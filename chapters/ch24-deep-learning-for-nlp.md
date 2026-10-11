@@ -32,8 +32,8 @@
 **自注意力（self-attention）** — 序列对自身的 Q/K/V 注意力；与词序无关、可矩阵并行。
 **多头注意力（multiheaded attention）** — m 组独立注意力并行后拼接，让重要子块在结果中脱颖而出。
 **位置嵌入（positional embedding）** — 为每个位置学习的向量，补回自注意力丢失的词序信息。
-**掩码语言模型（masked language model, MLM）** — 掩住输入词再让模型预测，无监督习得双向上下文表示。
-**上下文表示（contextual representation）** — 词向量随上下文变化，使多义词 rose 的花义与升起义分开聚类。
+**掩码语言模型（MLM）** — 掩住输入词再让模型预测，无监督习得双向上下文表示（图24-12："The river [masked] five feet" 经两层双向 RNN，被掩位输出接专门的 MLM 嵌入 → 前馈 → 预测 "rose"）。
+**上下文表示（contextual representation）** — 词向量随上下文变化（图24-11：左到右 RNN 每步输出当前词的上下文表示并预测下一词），使多义词 rose 的花义与升起义分开聚类。
 
 ## 思维模型
 - 把词嵌入看作"压缩的共现统计"：10^25 维稀疏 n 元计数压成几百维稠密空间，换来泛化能力。
@@ -57,13 +57,13 @@
 统计窗口内共现次数 X_ij（窗口约 5 词），P_ij = X_ij/X_i。核心直觉：比值 P(ice,w)/P(steam,w) 在 w=solid 时高、w=gas 时低、w=the 时≈1，从而区分词义。数学推导得约束 E_i·E_j = log P_ij（点积 = 共现概率的对数）。每个词学两个向量最后相加以防过拟合；普通台式机 CPU 数小时即可从几十亿词训练完成。领域版本可还原知识：材料科学语料的嵌入能预测未被发现的热电材料。
 
 **RNN/LSTM：语言模型、分类与生成**
-训练：x_t 为词嵌入，观察目标是右移一位的词序列，BPTT 且所有时间步共享权重。生成：从输出分布采样→反馈为下一输入→迭代（采样策略是超参数）。标注/共指分类：每步一个 softmax（输出词性或先行词分布）；共指需双向 RNN 看全句。句子级分类（情感分析）：取末位隐状态或平均池化聚合后接前馈层。LSTM 门控可在 "The athletes, who …, now ___" 中把复数特征原样前传，正确选 "compete" 而非 "competes"。
+结构（图24-4）：隐藏层 z 带延迟 Δ 的自环；z_t 经权重 w_xz 接词嵌入 x_t、经 w_zz 接 z_{t−1}，输出 y_t = softmax(w_zy·z_t)；按时间展开（z_0→z_1→z_2→z_3）即所有时间步共享权重的前馈网。双向 RNN 词性标注（图24-5）：每位置左到右与右到左两个 RNN 的隐向量拼接 → 前馈 → 词类；"Yesterday they cut the rope" → Adverb / Pronoun / PastTenseVerb / Determiner / Noun。训练：x_t 为词嵌入，观察目标是右移一位的词序列，BPTT 且所有时间步共享权重。生成：从输出分布采样→反馈为下一输入→迭代（采样策略是超参数）。标注/共指分类：每步一个 softmax（输出词性或先行词分布）；共指需双向 RNN 看全句。句子级分类（情感分析）：取末位隐状态或平均池化聚合后接前馈层。LSTM 门控可在 "The athletes, who …, now ___" 中把复数特征原样前传，正确选 "compete" 而非 "competes"。
 
 **注意力 seq2seq 与解码**
-编码器读完源句，其最终隐状态作为解码器初值；<start>/<end> 标记边界。注意力计算：r_ij = 目标状态 h_{i−1} 与源状态 s_j 的原始得分 → a_ij = softmax（对所有 j）→ c_i = Σ_j a_ij·s_j → 解码器输入为 [x_i; c_i]。softmax 三作用：使注意力可微（梯度可回传）、允许捕获远距上下文、可表示不确定性。解码：贪心（每步一个选择）或束搜索（每步保留 k 个最优假设；现代 NMT 用 k=4–8，老式统计 MT 需 ≥100）。
+编码器读完源句，其最终隐状态作为解码器初值；<start>/<end> 标记边界（图24-6：源 LSTM 链读 "The man is tall" + <start>，目标链生成 "El hombre es alto" + <end>）。注意力计算（图24-7a 虚线）：r_ij = h_{i−1}·s_j（目标状态与源隐状态点积得分）→ a_ij = e^{r_ij} / Σ_k e^{r_ik} → c_i = Σ_j a_ij·s_j → 解码器 h_i = RNN(h_{i−1}, [x_i, c_i])（无注意力时 h_i = RNN(h_{i−1}, x_i)）。图24-7b 注意力矩阵：行=源词 The/front/door/is/red，列=目标词 La/puerta/de/entrada/es/roja，每列概率和为 1，深色格即词级对齐 La↔The、puerta↔door、es↔is、roja↔red；entrada 兼看 front 与 door，对应西语语序反转。softmax 三作用：使注意力可微（梯度可回传）、允许捕获远距上下文、可表示不确定性。解码：贪心（每步一个选择）或束搜索（每步保留 k 个最优假设；现代 NMT 用 k=4–8，老式统计 MT 需 ≥100）。
 
 **Transformer 层**
-自注意力：q_i = W_q x_i（注意力来源）、k_i = W_k x_i（去向）、v_i = W_v x_i（内容）；c_i = Σ_j softmax_j(q_i·k_j/√d)·v_j，缩放因子 √d 提高数值稳定性，且注意力不对称（r_ij ≠ r_ji）。多头：句子的 m 个副本各用独立权重做注意力再拼接。每层 = 自注意力 → 逐位置前馈（ReLU）→ 两处残差连接；层数常 ≥6。输入 = 词嵌入 + 位置嵌入。编码器用于分类；解码器另加因果自注意力（只看左侧）与对编码器输出的注意力模块。
+自注意力（精确式）：q_i = W_q x_i（注意力来源）、k_i = W_k x_i（去向）、v_i = W_v x_i（内容）；r_ij = (q_i·k_j)/√d，a_ij = e^{r_ij} / Σ_k e^{r_ik}，c_i = Σ_j a_ij·v_j；缩放因子 √d 稳数值，注意力不对称（r_ij ≠ r_ji）。多头：句子的 m 个副本各用独立权重做注意力再拼接（拼接而非求和，让重要子块脱颖而出）。单层结构（图24-9）：输入向量 → 自注意力 → 残差相加 → 逐位置前馈（ReLU）→ 残差相加 → 输出向量；层数常 ≥6。词性标注管线（图24-10）：词嵌入 + 位置嵌入_i 相加 → 3 层 Transformer → 每位置前馈 + softmax。解码器另加因果自注意力（只看左侧）与对编码器输出的注意力模块。
 
 ## 参考表
 表示与模型演进对比：
@@ -82,13 +82,9 @@ seq2seq 三大缺陷 vs 对策：邻近上下文偏差（注意力可直达任�
 解码方式对比：贪心解码（快、无纠错）vs 束搜索（保留 k 个假设、牺牲速度换全局概率）。
 
 ## 完整示例
-注意力翻译 + 束解码："The front door is red" → "La puerta de entrada es roja"
-1. 源 RNN 逐词编码，最终隐状态初始化目标 RNN；遇 <start> 开始生成。
-2. 生成 "La" 时注意力集中于 "The"，生成 "puerta" 时移到 "door"——注意力矩阵即词级对齐。
-3. 贪心解码陷阱："La" 之后按局部概率可能选 "entrada"（对应 front），但西语名词必须先于修饰语，句子崩坏且无法回退。
-4. 束搜索（b=2）：时间步 3 时，高分假设 "La entrada" 只能接低概率延续而"从束上脱落"；存活假设收敛到正确语序，全部生成 <end> 后输出得分最高的假设。
+**词嵌入可视化与类比（图24-1、24-2）**：60 亿词训练的 100 维 GloVe 向量投影到二维后自然聚类——{france, greece, germany}、{nephew, niece, uncle, aunt}、{car, bicycle, truck}、{banana, pizza, apple}。类比 D = C + (B − A) 取最近邻的结果（A / B / C / D / 关系）：Athens / Greece / Oslo / Norway / 首都；Astana / Kazakhstan / Harare / Zimbabwe / 首都；Angola / kwanza / Iran / rial / 货币；copper / Cu / gold / Au / 元素符号；Microsoft / Windows / Google / Android / 操作系统；New York / New York Times / Baltimore / Baltimore Sun / 报纸；Berlusconi / Silvio / Obama / Barack / 名；Switzerland / Swiss / Cambodia / Cambodian / 国籍；Einstein / scientist / Picasso / painter / 职业；brother / sister / grandson / granddaughter / 亲属关系；Chicago / Illinois / Stockton / California / 州；possibly / impossibly / ethical / unethical / 否定；mouse / mice / dollar / dollars / 复数；easy / easiest / lucky / luckiest / 最高级；walking / walked / swimming / swam / 过去式。
 
-配套的词嵌入类比：A=Athens、B=Greece、C=Oslo，D = C + (B−A) 的最近邻单词是 Norway——"首都→国家"关系表现为近似恒定的向量差。
+**束解码数值轨迹（图24-8，b=2，词得分=softmax 对数概率，假设得分=累加和）**：译 "The front door is red" → "La puerta de entrada es roja"。t1：La −0.3｜Una −2.1。t2：La entrada −1.1｜La puerta −1.2（Una 支掉队）。t3：La entrada 只能续 de −1.5 / puerta −1.9，而 La puerta 续 de −0.5 / del −0.7 → 束变为 La puerta de −1.7 与 La puerta del −1.9——贪心路径 "La entrada"（西语名词须先于修饰语）从束上脱落。全部生成 <end> 后输出得分最高的假设。
 
 ## 要点
 1. 独热→词嵌入是 NLP 深度化的第一次免费午餐：相似词共享统计结构，"a black cat" 的证据即可泛化到 "the fulvous kitten"。

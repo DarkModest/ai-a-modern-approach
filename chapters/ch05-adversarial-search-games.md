@@ -55,35 +55,66 @@
 
 ## 算法要点
 
-极小化极大
+极小化极大（图5-3；Max-Value/Min-Value 返回 (utility, move) 对）
 ```
-function Minimax(s):
-    if Is-Terminal(s): return Utility(s)
-    if To-Move(s) = max: return max_{a∈Actions(s)} Minimax(Result(s,a))
-    else:                return min_{a∈Actions(s)} Minimax(Result(s,a))
+function Minimax-Search(game, state) returns 一个动作
+    player ← game.To-Move(state)
+    value, move ← Max-Value(game, state)
+    return move
+
+function Max-Value(game, state) returns 一个(utility, move)对
+    if game.Is-Terminal(state) then return game.Utility(state, player), null
+    v, move ← −∞, null
+    for each a in game.Actions(state) do
+        v2, a2 ← Min-Value(game, game.Result(state, a))
+        if v2 > v then v, move ← v2, a
+    return v, move
+
+function Min-Value(game, state) returns 一个(utility, move)对
+    if game.Is-Terminal(state) then return game.Utility(state, player), null
+    v, move ← +∞, null
+    for each a in game.Actions(state) do
+        v2, a2 ← Max-Value(game, game.Result(state, a))
+        if v2 < v then v, move ← v2, a
+    return v, move
 ```
 时间 O(b^m)；空间 O(m)（逐个生成动作）。
 
-α-β 剪枝搜索
+α-β 剪枝搜索（图5-7；与图5-3 相同，仅多维护 α、β 并在越界时截断）
 ```
-function Alpha-Beta-Search(s):
-    return Max-Value(s, −∞, +∞)
+function Alpha-Beta-Search(game, state) returns 一个动作
+    player ← game.To-Move(state)
+    value, move ← Max-Value(game, state, −∞, +∞)
+    return move
 
-function Max-Value(s, α, β):
-    if Is-Terminal(s): return Utility(s)
-    v ← −∞
-    for a ∈ Actions(s):
-        v ← max(v, Min-Value(Result(s,a), α, β))
-        if v ≥ β: return v          // β 截断：min 上层不会走这条路
-        α ← max(α, v)
-    return v
-// Min-Value 对称：v ≤ α 时截断，更新 β
+function Max-Value(game, state, α, β) returns 一个(utility, move)对
+    if game.Is-Terminal(state) then return game.Utility(state, player), null
+    v, move ← −∞, null
+    for each a in game.Actions(state) do
+        v2, a2 ← Min-Value(game, game.Result(state, a), α, β)
+        if v2 > v then
+            v, move ← v2, a
+            α ← Max(α, v)
+        if v ≥ β then return v, move     // β 截断：上层 min 不会走这条路
+    return v, move
+
+function Min-Value(game, state, α, β) returns 一个(utility, move)对
+    if game.Is-Terminal(state) then return game.Utility(state, player), null
+    v, move ← +∞, null
+    for each a in game.Actions(state) do
+        v2, a2 ← Max-Value(game, game.Result(state, a), α, β)
+        if v2 < v then
+            v, move ← v2, a
+            β ← Min(β, v)
+        if v ≤ α then return v, move     // α 截断：上层 max 不会走这条路
+    return v, move
 ```
-完美移动排序只需 O(b^{m/2}) 节点（有效分支因子 √b，国际象棋 35→6，同等时间深度翻倍）；简单排序（吃子→威胁→前进）即可达最好情况的约 2 倍。
+（中文版图中 Min-Value 误印为 β←Max(β, v)，应为 Min。）
+完美移动排序只需 O(b^{m/2}) 节点（有效分支因子 √b，国际象棋 35→6，同等时间深度翻倍）；简单排序（吃子→威胁→前进）即可达最好情况的约 2 倍以内。
 
 启发式版：把 Is-Terminal 换成 Is-Cutoff(s,depth)（固定深度或迭代加深），Utility 换成 Eval(s,p)。
 
-期望极小化极大
+期望极小化极大（Expectiminimax 公式，5.3 节）
 ```
 function Expectiminimax(s):
     if 终局: return Utility(s)
@@ -93,19 +124,20 @@ function Expectiminimax(s):
 ```
 O(b^m n^m)；西洋双陆棋 n=21、b≈20（可到 4000），实际只能搜约 3 层；机会节点剪枝需限定效用取值范围。
 
-蒙特卡罗树搜索（UCT）
+蒙特卡罗树搜索（图5-11；Select/Expand/Simulate/Back-Propagate 循环，常用 UCT 即 UCB1 作选择度量）
 ```
-function UCT-MCTS(state):
-    以 state 为根建树
-    while 时间未耗尽:
-        n ← Select: 从根沿树下行, 每步选 UCB1 最大的子节点直到叶
-        n′ ← Expand(n): 为 n 生成一个新子节点
-        z ← Simulate(n′): 按模拟策略 playout 到终局, 取效用 z
-        Backpropagate(n′→根): 路上每个节点 N ← N+1, U ← U+z
-    return 根处模拟次数 N 最多的移动
+function Monte-Carlo-Tree-Search(state) returns 一个动作
+    tree ← Node(state)
+    while Is-Time-Remaining() do
+        leaf ← Select(tree)           // 从根沿树下行, 每步选 UCB1 最大的子节点
+        child ← Expand(leaf)          // 为 leaf 生成一个新子节点
+        result ← Simulate(child)      // 按模拟策略 playout 到终局
+        Back-Propagate(result, child) // 沿途 N ← N+1, U ← U+result
+    return Actions(state) 中指向模拟次数最多的节点的移动
+
 UCB1(n) = U(n)/N(n) + C·√(ln N(Parent(n)) / N(n))
 ```
-单次模拟代价对深度是线性而非指数；返回访问最多而非均值最高的节点（胜 65/100 优于胜 2/3——后者不确定性大）。
+单次模拟代价对深度是线性而非指数；返回访问最多而非均值最高的节点（胜 65/100 优于胜 2/3——后者不确定性大）。迭代示例（图5-10，已完成100次迭代）：(a) 选择沿 UCB1 走到叶 27/35；(b) 扩展新子节点 0/0，模拟得黑胜；(c) 反向传播 0/1→28/36→16/54→61/80→37/101（标注 = 胜场/场次）。
 
 ## 参考表
 
@@ -116,18 +148,26 @@ UCB1(n) = U(n)/N(n) + C·√(ln N(Parent(n)) / N(n))
 | 期望极小化极大 | O(b^m n^m) | 骰子概率已知 | 西洋双陆棋（约 3 层） |
 | MCTS | 时间预算内迭代 | 只需规则+模拟策略 | 围棋（b=361）、无先验新博弈 |
 
-书中算力对照：每秒评估约 100 万节点、b=32、平均 100 步的博弈、预算 10 亿状态——极小化极大约 6 层，完美排序 α-β 约 12 层，MCTS 约 1000 万次模拟。国际象棋实战：纯极小化极大约 5 层（被人类业余棋手击败）；α-β+换位表约 14 层（专家级）；Stockfish 深度超 30。
+书中算力对照：每秒评估约 100 万节点、b=32、平均 100 步的博弈、预算 10 亿状态——极小化极大约 6 层，完美排序 α-β 约 12 层，MCTS 约 1000 万次模拟。国际象棋实战：纯极小化极大约 5 层（35^5≈5000万节点/分钟，被平均水平的人类棋手击败）；α-β+换位表约 14 层（专家级）；Stockfish 深度超 30。
 
 ## 完整示例
 
-α-β 剪枝数值演示（图5-2/5-5 的两层博弈树）：根为 max，动作 a₁/a₂/a₃ 分别到达 min 节点 B、C、D；每个 min 节点下有 3 个叶（效用 2–14）。
+**α-β 剪枝逐步演示（图5-2 / 图5-5）**：二层博弈树，根为 max 节点 A，动作 a₁/a₂/a₃ 分别到达 min 节点 B、C、D；B 的叶 = 3、12、8，C 的叶 = 2、4、6，D 的叶 = 14、5、2；极小化极大值 A=3、B=3、C=2、D=2。各步中每个节点可能的取值范围（图5-5 a–f）：
 
-1. 看 B 的叶：3、12、8 → B = 3（min 取最小）。此时根已知"至少 3"，α=3。
-2. C 的第一个叶 = 2 ≤ α=3：max 在根必不选 C → 剪掉 C 其余两叶（无论何值都不影响根）。
-3. D：第一个叶 14 → D≤14 仍大于 3，继续；第二个 5，继续；第三个 2 → D = 2。
-4. 根 = max(3, ≤2 已剪, 2) = 3 → 最优决策 a₁；min 的最佳回应是 b₁。
+- (a) B 的第一个叶 = 3 → B ∈ (−∞, 3]；根仍 (−∞, +∞)。
+- (b) B 的第二个叶 = 12 > 3 → B 不变，仍 (−∞, 3]。
+- (c) B 的第三个叶 = 8 → B = [3, 3]；根更新为 [3, +∞)（α=3，"至少 3"）。
+- (d) C 的第一个叶 = 2 → C ∈ (−∞, 2] ≤ α=3 → max 在根必不选 C，剪掉 C 其余两叶。
+- (e) D 的第一个叶 = 14 → D ∈ (−∞, 14]；根的区间收缩为 [3, 14]。
+- (f) D 的第二、三个叶 = 5、2 → D = [2, 2]；根 = max(3, ≤2, 2) = [3, 3] → 最优决策 a₁，min 的最佳回应是 b₁。
 
 共评估 7 个叶而非 9 个。若移动排序让 D 的第三个叶（值 2）最先生成，D 还能再剪两叶——排序质量直接决定剪枝收益（"应先检查有可能是最佳选择的节点"）。
+
+**叶值赋值改变最佳移动（图5-14）**：max 根下 a₁/a₂ 各到一个机会节点（P=0.9/0.1）再到 min 叶。叶值 [1,2,3,4] 时：a₁ = 0.9·2+0.1·3 = 2.1 > a₂ = 0.9·1+0.1·4 = 1.3，选 a₁；保持叶值排序不变改为 [1,20,30,400]：a₁ = 21 < a₂ = 0.9·1+0.1·400 = 40.9，改选 a₂。故机会博弈中评价函数必须返回获胜概率的正线性变换值。
+
+**启发式极小化极大可能出错（图5-16）**：max 根下两个 min 节点，左叶 {99, 1000, 1000, 1000} → min = 99，右叶 {100, 101, 102, 100} → min = 100；启发式极小化极大选右（100 > 99），但若 min 可能犯错，左侧期望（均值 774.75）远优于右侧（100.75）——对次优对手，"极小化极大最优"未必实战最优。
+
+**西洋双陆棋博弈树（图5-13）**：max → 机会节点（掷两骰：对子 1-1、6-6 各 P=1/36，非对子 1-2、6-5 各 P=1/18，共 21 种结果）→ min → 机会 → max → 终局。正因 n=21 的机会分支，期望极小化极大 O(b^m·n^m) 在此只能搜约 3 层。
 
 ## 要点
 1. 博弈 6 元组形式化：S₀、To-Move、Actions、Result、Is-Terminal、Utility；极小化极大是与或搜索到多值效用的推广。

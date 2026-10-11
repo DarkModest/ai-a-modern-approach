@@ -50,7 +50,18 @@
 
 **事件演算的流保持公理**（后继状态公理风格）：若 Happens(e,t₁,t₃)、t₁<t₂<t₃、Initiates(e,f,t₂)、t₃<t₄，且在 (t₁,t₄) 内无其他事件启停 f（¬Clipped），则 T(f,t₄)；对偶地由 Terminates 得 ¬T(f,t₄)。可扩展到并发、外因、连续与非确定性事件。
 
-**时间区间（Allen 代数）**：区分瞬间（时长 0）与延续间隔；Begin/End/Time/Duration/Date 锚定绝对时间；区间关系：Meet（相接）、Before、After、During、Overlaps、Starts、Ends、Equal——注意 Overlap 按定义不对称（仅 i 早于 j 开始时为真），为的是公理更简洁。例：伊丽莎白二世的统治 Meets 乔治六世的统治；猫王走红 Overlap 20 世纪 50 年代。
+**时间区间（Allen 代数）**：区分瞬间（时长 0）与延续间隔；Begin/End/Time/Duration/Date 锚定绝对时间。区间关系完整集合（图 10-2，Allen, 1983）：
+```
+Meet(i,j)     ⇔ End(i) = Begin(j)
+Before(i,j)   ⇔ End(i) < Begin(j)
+After(j,i)    ⇔ Before(i,j)
+During(i,j)   ⇔ Begin(j) < Begin(i) < End(i) < End(j)
+Overlap(i,j)  ⇔ Begin(i) < Begin(j) < End(i) < End(j)
+Starts(i,j)   ⇔ Begin(i) = Begin(j)
+Finishes(i,j) ⇔ End(i) = End(j)
+Equals(i,j)   ⇔ Begin(i) = Begin(j) ∧ End(i) = End(j)
+```
+注意 Overlap 按定义不对称（仅 i 早于 j 开始时为真），为的是公理更简洁。例：伊丽莎白二世的统治 Meets 乔治六世的统治；猫王走红 Overlap 20 世纪 50 年代。
 
 **缺省规则形式（Reiter）**：P(x) : J₁(x),…,Jₙ(x) / C(x)。P 为先决条件，Jᵢ 为论证（任一可证为假则推不出 C），C 为结论；Jᵢ 与 C 中的变量必须都出现在 P 中。拓展（extension）= 含原始事实与缺省结论的最大集合，其中每个缺省结论的论证都与该集合一致；可用规则优先级消解歧义。
 
@@ -73,6 +84,34 @@
 | 擅长 | 信念修正 | 多假设切换（换奥运场地只改一条断言）、生成最小解释（"汽车无法启动"：电瓶没电/没油）|
 
 ## 完整示例
+**上层本体论（图 10-1）**——每条线表示低层概念是高层概念的具体化（具体化不一定排他：人类既是动物又是智能体）：
+```
+一切事物
+├─ 抽象对象
+│   ├─ 集合 ── 类别
+│   ├─ 数字
+│   └─ 表示性对象 ── 语句；量度 ── 时间、重量
+└─ 一般化事件
+    ├─ 时段 ── 瞬间
+    ├─ 地点
+    ├─ 对象 ── 事物 ── 动物 ┐
+    │            │      智能体 ┴─ 人类
+    │            └─ 物质 ── 固体、液体、气体
+    └─ 过程
+```
+
+**Classic 描述逻辑语法（图 10-6，一个子集）**：
+```
+概念   → Thing | 概念名
+       | And(概念, …)          | All(角色名, 概念)
+       | AtLeast(整数, 角色名) | AtMost(整数, 角色名)
+       | Fills(角色名, 个体名, …) | SameAs(路径, 路径)
+       | OneOf(个体名, …)
+路径   → [角色名, …]
+概念名 → 成人 | 女人 | 男人 | …
+角色名 → 配偶 | 女儿 | 儿子 | …
+```
+
 **类别与继承（FOL + Classic 记法）**：成员 b ∈ Basketballs；子类 Basketballs ⊆ Balls；全称性质 ∀x Food(x)⇒Edible(x) 加 Fruit⊆Food、Apple⊆Fruit ⟹ 苹果可食用；{本科生, 研究生} 是学生的不相交完全分解（=划分）；单身汉 = And(Unmarried, Adult, Male)；"至少 3 个儿子、至多 2 个女儿、儿子皆无业且娶医生、女儿皆物理或数学教授的男人" = And(Man, AtLeast(3,Son), AtMost(2,Daughter), All(Son, And(Unemployed, Married, Doctor)), All(Daughter, Or(Prof(Physics), Prof(Math))))——描述逻辑对谓词做代数运算，一阶逻辑中没有对应物。
 
 **默认推理（鸟会飞 / 尼克松菱形）**：

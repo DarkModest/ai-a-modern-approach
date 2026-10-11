@@ -6,10 +6,10 @@
 ## 框架
 - **贝叶斯网络 (Bayesian network)**
   - 何时使用：域是局部结构化（稀疏）的，即每个变量只被少量变量直接影响
-  - 如何做：有向无环图 + 每节点条件概率表（CPT）；语义为 P(x₁,…,xₙ) = Πᵢ P(xᵢ | Parents(Xᵢ))。按拓扑序逐个添加节点，每个节点只选"直接因果影响"它的前驱作父节点
+  - 如何做：有向无环图 + 每节点条件概率表（CPT）；按拓扑序逐个添加节点，每个节点只选"直接因果影响"它的前驱作父节点（语义公式见关键概念·链式法则）
 - **变量消元 (variable elimination)**
   - 何时使用：精确计算后验 P(X|e)，网络树宽较小时
-  - 如何做：把联合分布写成因子（以变量为索引的矩阵）乘积；按消元顺序反复执行"取所有含变量 Z 的因子→逐点相乘→对 Z 求和→存为新因子"；贪心排序：每次消去使新因子最小的变量；先删除与查询无关的叶变量
+  - 如何做：把联合分布写成因子（以变量为索引的矩阵）乘积；按消元顺序反复"取含 Z 的因子→逐点相乘→对 Z 求和→存为新因子"（贪心排序、无关叶变量删除见算法要点）
 - **D-分离 (d-separation)**
   - 何时使用：判定给定 Z 时 X 是否条件独立于 Y
   - 如何做：① 取 X、Y、Z 及其祖先的祖先子图；② 连接共享子节点而无连边的节点对（道德化）；③ 去掉箭头方向；④ 若 Z 阻塞所有 X–Y 无向路径，则 X ⊥ Y | Z
@@ -25,7 +25,7 @@
 
 ## 关键概念
 - **条件概率表 (conditional probability table, CPT)** — 每个条件事件（父节点值组合）下一行条件概率；k 个布尔父节点需 2ᵏ 个独立参数
-- **链式法则 (chain rule)** — 联合分布恒可写成条件概率连乘；贝叶斯网络是它的最简形式
+- **链式法则 (chain rule)** — P(x₁,…,xₙ) = Πᵢ P(xᵢ|xᵢ₋₁,…,x₁)（式 13-1），联合分布恒可写成条件概率连乘；贝叶斯网络语义 P(x₁,…,xₙ) = Πᵢ P(xᵢ|parents(Xᵢ))（式 13-2）是它的最简形式
 - **马尔可夫毯 (Markov blanket)** — 变量的父节点+子节点+子节点的其他父节点；给定它，变量条件独立于网络中所有其他节点
 - **多重树 (polytree)** — 任意两节点间至多一条无向路径（单连通）；精确推断时间空间均线性于网络规模
 - **噪声或 (noisy-OR)** — 各原因的抑制相互独立时，子为假的概率 = 为真父节点抑制概率之积；用 O(k) 参数代替 O(2ᵏ)
@@ -53,41 +53,92 @@
 
 ## 算法要点
 
-枚举推理（ENUMERATION-ASK，深度优先计算嵌套求和）：
+枚举推断（图 13-11，深度优先计算嵌套求和；时间 O(2ⁿ)、空间 O(n)）：
 ```
-ENUMERATE-ALL(vars, e):
-  若 vars 空: 返回 1.0
-  Y ← vars 首变量
-  若 Y 为证据 (=y): 返回 P(y|Parents(Y)) × ENUMERATE-ALL(rest, e)
-  否则: 返回 Σ_y P(y|Parents(Y)) × ENUMERATE-ALL(rest, e ∪ Y=y)
-对 X 每个值调用上式得 Q(x)，返回 NORMALIZE(Q)
-```
-时间 O(2ⁿ)、空间 O(n)；关键改进：求和尽量内移（利用因子只依赖少数变量）。
+function Enumeration-Ask(X, e, bn) returns X 的分布
+  inputs: X（查询变量），e（变量 E 的观测值），bn（含变量 vars 的贝叶斯网络）
+  Q(X) ← X 的分布，初始为空
+  for X 的每个值 xᵢ do
+      Q(xᵢ) ← Enumerate-All(vars, e_{xᵢ})    // e_{xᵢ} 是 e 在 X=xᵢ 的扩展
+  return Normalize(Q(X))
 
-变量消元（VE）：
-```
-F ← 所有变量的 CPT 因子（证据值代入）
-删除与查询无关的变量（反复剪非查询/非证据叶节点）
-for 每个隐变量 Z（按消元顺序）:
-    F_Z ← F 中含 Z 的因子
-    F ← F \ F_Z ∪ { Σ_Z Π F_Z }
-返回 F 剩余因子逐点相乘后归一化
+function Enumerate-All(vars, e) returns 一个实数
+  if Empty?(vars) then return 1.0
+  V ← First(vars)
+  if V 是在 e 中取值 v 的证据变量
+      then return P(v | parents(V)) × Enumerate-All(Rest(vars), e)
+      else return Σ_v P(v | parents(V)) × Enumerate-All(Rest(vars), e_v)
+           // e_v 是 e 在 V=v 的扩展
 ```
 
-吉布斯采样（GIBBS-ASK）：
+变量消元（图 13-13；动态规划：按 Order 从右到左消隐变量、存中间因子）：
 ```
-随机初始化状态 x（证据固定）
-重复 N 次:
-    均匀选非证据变量 Zᵢ
-    按 P(Zᵢ|mb) ∝ P(Zᵢ|Parents(Zᵢ)) × Π_{c∈children(Zᵢ)} P(c|Parents(c)) 重采样
-    计数当前状态的 X 值
-返回 NORMALIZE(计数)
+function Elimination-Ask(X, e, bn) returns X 的分布
+  inputs: 同上
+  factors ← []
+  for each V in Order(vars) do
+      factors ← [Make-Factor(V, e)] + factors
+      if V 是隐变量 then factors ← Sum-Out(V, factors)
+  return Normalize(Pointwise-Product(factors))
 ```
-每步代价只与 Zᵢ 的子节点数和值域大小成比例，与网络规模无关。
+评估前先反复删除与查询无关的叶变量；消元顺序用贪心启发式（使下一个构造的因子最小）。
 
-D-分离判定：祖先子图 → 道德化 → 无向化 → 检查 Z 是否阻塞所有路径（见框架节）。
+先验采样（图 13-16；按拓扑序，父节点先被采样）：
+```
+function Prior-Sample(bn) returns 一个从 bn 指定的先验 P(X₁,…,Xₙ) 采样的事件
+  x ← 一个具有 n 个元素的事件
+  for each 变量 Xᵢ in X₁, …, Xₙ do
+      x[i] ← P(Xᵢ | parents(Xᵢ)) 中的一个随机样本
+  return x
+```
 
-Metropolis-Hastings：从提议分布 q(x′|x) 采样新状态，以概率 min(1, [π(x′)q(x|x′)]/[π(x)q(x′|x)]) 接受否则保持；任意遍历提议均保证收敛；吉布斯是接受率为 1 的 MH 特例。π 只以比率出现 → 用联合概率（CPT 乘积）之比计算，未变变量各项自动消去。
+拒绝采样（图 13-17；一致估计，但接受率 = P(e)）：
+```
+function Rejection-Sampling(X, e, bn, N) returns P(X|e) 的估计
+  inputs: X（查询变量），e（证据 E 的观测值），bn（贝叶斯网络），N（样本总数）
+  local variables: C，X 每个值的计数向量，初始为 0
+  for j = 1 to N do
+      x ← Prior-Sample(bn)
+      if x 与 e 一致 then C[xⱼ] ← C[xⱼ] + 1    // xⱼ 是 X 在 x 中的值
+  return Normalize(C)
+```
+
+似然加权（图 13-18；不拒绝样本，按证据似然累积权重）：
+```
+function Likelihood-Weighting(X, e, bn, N) returns P(X|e) 的估计
+  local variables: W，X 每个值的加权计数向量，初始为 0
+  for j = 1 to N do
+      x, w ← Weighted-Sample(bn, e)
+      W[xⱼ] ← W[xⱼ] + w                        // xⱼ 是 X 在 x 中的值
+  return Normalize(W)
+
+function Weighted-Sample(bn, e) returns 一个事件与一个权重
+  w ← 1；x ← 一个具有 n 个元素的事件，证据变量取 e 中的固定值
+  for i = 1 to n do
+      if Xᵢ 是证据变量（在 e 中取值 xᵢ）
+          then w ← w × P(Xᵢ = xᵢ | parents(Xᵢ))
+          else x[i] ← P(Xᵢ | parents(Xᵢ)) 中的一个随机样本
+  return x, w
+```
+
+吉布斯采样（图 13-20；MCMC，按马尔可夫毯逐变量重采样）：
+```
+function Gibbs-Ask(X, e, bn, N) returns P(X|e) 的估计
+  local variables: C，X 每个值的计数向量，初始为 0
+                   Z，bn 中的非证据变量
+                   x，网络的当前状态，由 e 初始化
+  用 Z 中变量的随机值初始化 x
+  for k = 1 to N do
+      按任意分布 ρ(i) 从 Z 中选择变量 Zᵢ      // 循环遍历变量也可行
+      从 P(Zᵢ | mb(Zᵢ)) 中采样，设置 x 中 Zᵢ 的值
+      C[xⱼ] ← C[xⱼ] + 1                        // xⱼ 是 X 在 x 中的值
+  return Normalize(C)
+```
+马尔可夫毯分布（式 13-10）：P(xᵢ|mb(Xᵢ)) = α·P(xᵢ|parents(Xᵢ))·Π_{c∈Children(Xᵢ)} P(c|parents(c))；每步代价只与子节点数和值域大小成比例，与网络规模无关。
+
+D-分离判定：祖先子图 → 道德化 → 无向化 → 检查 Z 是否阻塞所有 X–Y 路径（见框架节）。
+
+Metropolis-Hastings：从提议分布 q(x′|x) 采样新状态，以概率 min(1, [π(x′)q(x|x′)]/[π(x)q(x′|x)]) 接受，否则保持原状态；任意遍历提议均保证收敛；吉布斯是接受率恒为 1 的 MH 特例。π 只以比率出现 → π(x′)/π(x) = P(x′,e)/P(x,e)，用 CPT 乘积之比计算，未变变量各项自动消去。
 
 ## 参考表
 
@@ -104,18 +155,39 @@ Metropolis-Hastings：从提议分布 q(x′|x) 采样新状态，以概率 min(
 
 ## 完整示例
 
-入室盗窃网络：Burglary B → Alarm A ← Earthquake E；A → JohnCalls J；A → MaryCalls M。
-CPT：P(B)=⟨0.001, 0.999⟩，P(E)=⟨0.002, 0.998⟩；P(a|b,e)=0.95，P(a|b,¬e)=0.94，P(a|¬b,e)=0.29，P(a|¬b,¬e)=0.001；P(j|a)=0.90，P(j|¬a)=0.05；P(m|a)=0.70，P(m|¬a)=0.01。
+入室盗窃网络（图 13-2，全书最经典的推理示例）：Burglary B → Alarm A ← Earthquake E；A → JohnCalls J；A → MaryCalls M。（防盗警报对盗窃可靠，偶被轻微地震触发；邻居 John、Mary 听到警报会打电话，但偶尔误听铃声。）
 
-联合条目示例：
-P(j, m, a, ¬b, ¬e) = 0.999 × 0.998 × 0.001 × 0.90 × 0.70 ≈ 0.000628。
+CPT（图 13-2 转录；每行只列 P(true|·)，false 行 = 1 − 该值）：
 
-查询 P(B | j, m)（两邻居都来电话，求盗窃概率）：
-- 枚举法：将求和内移为嵌套表达式（对 E、A 求和的树），自底向上计算得 P(B|j,m) = α⟨0.00059224, 0.0014919⟩ ≈ **⟨0.284, 0.716⟩**——即使两人都打电话，盗窃概率也只有约 28%。
-- 变量消元同一查询：f₁(B)=P(B)，f₂(E)=P(E)，f₃(A,B,E)=P(A|B,E)，f₄(A)=⟨0.90, 0.05⟩（J=true 代入），f₅(A)=⟨0.70, 0.01⟩（M=true 代入）。
-  ① 消 A：f₆(B,E) = Σ_A f₃·f₄·f₅（2×2 因子）；② 消 E：f₇(B) = Σ_E f₂·f₆；③ 答案 = α f₁·f₇。
+根节点：P(B=true) = 0.001；P(E=true) = 0.002。
 
-节点顺序实验（同一联合分布的三种表示）：因果序 B,E,A,J,M → 10 个参数；M,J,A,B,E → 13 个；M,J,E,B,A → 31 个（与完全联合分布相同）。
+| B | E | P(A=true\|B,E) |
+|---|---|---|
+| t | t | 0.95 |
+| t | f | 0.94 |
+| f | t | 0.29 |
+| f | f | 0.001 |
+
+| A | P(J=true\|A) |
+|---|---|
+| t | 0.90 |
+| f | 0.05 |
+
+| A | P(M=true\|A) |
+|---|---|
+| t | 0.70 |
+| f | 0.01 |
+
+- 联合条目（贝叶斯网络语义 = 链式法则的简化，式 13-1/13-2）：P(j, m, a, ¬b, ¬e) = P(j|a)P(m|a)P(a|¬b∧¬e)P(¬b)P(¬e) = 0.90 × 0.70 × 0.001 × 0.999 × 0.998 ≈ 0.000628。
+- 查询 P(B | j, m)（两邻居都来电话，求盗窃概率）：
+  - 枚举法：求和内移得嵌套式（式 13-5）P(B|j,m) = α·P(B)·Σ_e P(e)·Σ_a P(a|B,e)P(j|a)P(m|a)，其表达式树（图 13-10）自顶向下乘、在"+"节点求和，j、m 路径重复；自底向上计算得 P(B|j,m) = α〈0.00059224, 0.0014919〉 ≈ **〈0.284, 0.716〉**——即使两人都打电话，盗窃概率也只有约 28%。
+  - 变量消元同一查询：f₁(B)=P(B)，f₂(E)=P(E)，f₃(A,B,E)=P(A|B,E)，f₄(A)=〈P(j|a), P(j|¬a)〉=〈0.90, 0.05〉（J=true 代入），f₅(A)=〈0.70, 0.01〉（M=true 代入）。① 消 A：f₆(B,E) = Σ_a f₃·f₄·f₅ = (f₃(a,B,E)f₄(a)f₅(a)) + (f₃(¬a,B,E)f₄(¬a)f₅(¬a))；② 消 E：f₇(B) = Σ_e f₂·f₆；③ 答案 = α·f₁·f₇。
+- 逐点乘积与求和消元（图 13-12）：f(X,Y)×g(Y,Z)=h(X,Y,Z)，只在公共变量取值一致的行间相乘（如 f=(0.3,0.7;0.9,0.1)、g=(0.2,0.8;0.6,0.4) ⇒ h 的 ttt 项=0.3×0.2=0.06，ftf 项=0.9×0.8=0.72）；从 h 消元 X：h₂(Y,Z)=h(x,Y,Z)+h(¬x,Y,Z) = [[0.06+0.18, 0.24+0.72],[0.42+0.06, 0.28+0.04]] = [[0.24, 0.96],[0.48, 0.32]]。因子规模随变量数指数增长——这是 VE 复杂度的来源。
+- 节点顺序实验（图 13-3，同一联合分布的三种表示）：因果序 B,E,A,J,M → 10 个参数；M,J,A,B,E → 1+2+4+2+4 = 13 个；M,J,E,B,A → 1+2+4+8+16 = 31 个（与完全联合分布相同）。
+- 噪声或 CPT（图 13-5，Fever 的父节点 Cold/Flu/Malaria，抑制概率 q_cold=0.6、q_flu=0.2、q_malaria=0.1 即"该原因单独存在时不发烧"的概率）：P(¬fever|各父节点值) = 为真父节点的 q 之积——f,f,f→1.0；f,f,t→0.1；t,f,f→0.6；t,t,f→0.6×0.2=0.12；t,t,t→0.6×0.2×0.1=0.012（P(fever) 为 1 减之）。3 个参数代替 2³=8 个。
+- 云—雨网络（图 13-15a：Cloudy→Sprinkler、Cloudy→Rain、Sprinkler→WetGrass←Rain；P(C)=0.5；P(s|c)=0.10、P(s|¬c)=0.50；P(r|c)=0.80、P(r|¬c)=0.20；P(w|s,r)=0.99、P(w|s,¬r)=0.90、P(w|¬s,r)=0.90、P(w|¬s,¬r)=0.00）：
+  - 似然加权（查询 P(Rain|cloudy, wetGrass)，拓扑序 C,S,R,W）：w=1.0 → Cloudy 为证据，w ← 1.0×P(cloudy)=0.5 → Sprinkler 采样自 P(S|cloudy)，设得 false → Rain 采样自 P(R|cloudy)，设得 true → WetGrass 为证据，w ← 0.5×P(w|¬s, r)=0.5×0.9=0.45；返回事件 [true, false, true, true] 权重 0.45，计入 Rain=true。
+  - 吉布斯采样（查询 P(Rain|sprinkler, wetGrass)，证据固定 S=true、W=true，初始状态 [true, **true**, false, **true**]）：采样 Cloudy 用 P(c|s,¬r) = α·P(c)P(s|c)P(¬r|c) = α×0.5×0.1×0.2，P(¬c|s,¬r) = α×0.5×0.5×0.8，即分布 α〈0.01, 0.20〉 ≈ 〈0.048, 0.952〉；设采得 false；再采样 Rain 设得 true，新状态 [false, **true**, true, **true**]。若游走访问 20 个 Rain 真状态、60 个假状态 → 估计 〈0.25, 0.75〉。
 
 ## 要点
 1. 构建网络的顺序：先定变量集并按因果序排列，再为每个节点选最小父节点集——保证无环、无冗余、最紧凑。

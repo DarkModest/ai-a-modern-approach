@@ -15,7 +15,7 @@
   - 如何做：随机选冲突变量，赋冲突最少的值；平台区用禁忌搜索、约束加权、模拟退火逃逸
 - **结构分解（Structure Exploitation）**：把约束图化归为树
   - 何时使用：图由独立分量组成，或"几乎是一棵树"（小环割集/小树宽）
-  - 如何做：独立分量各自求解；树状 CSP 定向弧一致后线性求解；一般图用割集调整 O(d^c·(n−c))（线性内存）或树分解 O(nd^{w+1})（指数内存）
+  - 如何做：独立分量各自求解；树状 CSP 定向弧一致后线性求解；一般图用割集调整 O(d^c·(n−c)·d²)（线性内存）或树分解 O(nd^{w+1})（指数内存）
 
 ## 关键概念
 - **CSP 三元组（X, D, C）** — 变量集、各变量的域、约束集（约束=scope+rel）；解 = 一致（不违反任何约束）且完整（每变量已赋值）的赋值；一般 CSP 求解是 NP 完全的。
@@ -53,63 +53,78 @@
 
 ## 算法要点
 
-AC-3（弧一致）
+AC-3（弧一致）（图6-3）
 ```
-function AC-3(csp):
-    queue ← 全部弧 (Xi,Xj)
-    while queue 非空:
-        (Xi,Xj) ← queue.pop()
-        if Revise(csp, Xi, Xj):
-            if Di = ∅: return Failure
-            for Xk ∈ Xi 的邻居, Xk≠Xj: queue.push((Xk,Xi))
-    return csp
+function AC-3(csp) returns false（若发现不一致）或 true（其他情况）
+    queue ← 弧的队列，初始化时包含 csp 中的所有弧
+    while queue 非空 do
+        (Xi, Xj) ← Pop(queue)
+        if Revise(csp, Xi, Xj) then
+            if Di 的规模 = 0 then return false
+            for each Xk ∈ Xi.Neighbors − {Xj} do
+                将 (Xk, Xi) 添加到 queue 中
+    return true
 
-function Revise(csp, Xi, Xj):       // 删 Di 中在 Dj 无伴的值
+function Revise(csp, Xi, Xj) returns true 当且仅当 Xi 的域被修改
     revised ← false
-    for x ∈ Di: if ¬∃y∈Dj 使 (x,y) 满足约束(Xi,Xj): 删 x; revised ← true
+    for each x ∈ Di do
+        if Dj 中不存在使 (x,y) 满足 (Xi,Xj) 约束的值 then
+            将 x 从 Di 中删除；revised ← true
     return revised
 ```
 n 变量、域≤d、c 条弧时 O(cd³)；结果与原 CSP 同解但域更小（有时直接解出/证明无解）。
 
-回溯搜索（含启发式与推断）
+回溯搜索（含启发式与推断）（图6-5）
 ```
-function Backtrack(assignment, csp):
-    if assignment 完整: return assignment
+function Backtracking-Search(csp) returns 一个解或 failure
+    return Backtrack(csp, {})
+
+function Backtrack(csp, assignment) returns 一个解或 failure
+    if assignment 是完整的 then return assignment
     var ← Select-Unassigned-Variable(csp, assignment)   // MRV；并列用度
-    for value ∈ Order-Domain-Values(var, assignment):   // 最少约束值优先
-        if value 与 assignment 一致:
-            加 var=value
-            inferences ← Inference(csp, var, value)      // 前向检验或 MAC
-            if inferences ≠ Failure:
-                result ← Backtrack(assignment, csp)
-                if result ≠ Failure: return result
-            撤销 inferences 与 var=value                  // 原地单状态修改
-    return Failure
+    for each value ∈ Order-Domain-Values(csp, var, assignment) do   // 最少约束值优先
+        if value 与 assignment 一致 then
+            将 {var = value} 添加到 assignment 中
+            inferences ← Inference(csp, var, assignment)   // 前向检验或 MAC
+            if inferences ≠ failure then
+                将 inferences 添加到 csp 中
+                result ← Backtrack(csp, assignment)
+                if result ≠ failure then return result
+            从 csp 中删除 inferences                  // 原地单状态修改
+            从 assignment 中删除 {var = value}
+    return failure
 ```
 MRV+前向检验互补：前向检验恰好增量算出 MRV 所需的域大小信息。
 
-最少冲突局部搜索
+最少冲突局部搜索（图6-9）
 ```
-function Min-Conflicts(csp, max_steps):
-    current ← 随机（或贪心逐变量最少冲突）完整赋值
-    for i = 1..max_steps:
-        if current 是解: return current
-        var ← 随机选一个处于冲突中的变量
-        value ← argmin_v Conflicts(var, v, current)     // 违反约束数最少
-        current[var] ← value
-    return Failure
+function Min-Conflicts(csp, max_steps) returns 一个解或 failure
+    inputs: csp，约束满足问题；max_steps，放弃前允许的步数
+    current ← csp 的一个初始完整赋值      // 随机选取或贪心逐变量取最少冲突值
+    for i = 1 to max_steps do
+        if current 是 csp 的一个解 then return current
+        var ← 从 csp.Variables 中随机选取的冲突变量
+        value ← 使 Conflicts(csp, var, v, current) 取得最小值的 v
+        在 current 中设置 var = value
+    return failure
 ```
 n 皇后：初始赋值后平均约 50 步可解百万皇后（与规模基本无关）；哈勃望远镜周调度从 3 周缩至约 10 分钟。
 
-树求解器（Tree-CSP-Solver）
+树求解器（Tree-CSP-Solver）（图6-11）
 ```
-function Tree-CSP-Solver(csp):
-    任选根, 变量按拓扑排序 X1..Xn（父先于子）
-    for i = n downto 2:
-        使 Parent(Xi) 相对 Xi 弧一致   // 删父域中无伴的值
-        if Parent 域空: return Failure
-    for i = 1 to n: Xi ← Di 中任一剩余值   // 定向弧一致 ⇒ 无需回溯
-    return 赋值
+function Tree-CSP-Solver(csp) returns 一个解或 failure
+    inputs: csp，具有 X, D, C 的 CSP（约束图为树）
+    n ← X 中变量个数
+    assignment ← 一个空的赋值
+    root ← X 中任一变量
+    X ← TopologicalSort(X, root)         // 以 root 为根、父先于子的线性排序（图6-10）
+    for j = n down to 2 do
+        Make-Arc-Consistent(Parent(Xj), Xj)   // 删父域中无伴的值
+        if 不能取得一致 then return failure
+    for i = 1 to n do
+        assignment[Xi] ← Di 中任一一致的值    // 定向弧一致 ⇒ 无需回溯
+        if 没有一致值 then return failure
+    return assignment
 ```
 O(nd²)；配合割集调整/树分解可推广到近似树状的图。
 
@@ -135,22 +150,35 @@ O(nd²)；配合割集调整/树分解可推广到近似树状的图。
 | 3 一致 = 路径一致（二元图） | 更贵（数独需查 255 960 条路径约束） | 可证明 2 色无解 |
 | 强 n 一致 | O(n²d) 求解，但建立成本/空间指数 | 理论上限 |
 | 独立分量分解 | O(d^c·n/c)，线性 | 100 布尔变量拆 4 份：宇宙寿命 → <1 秒 |
-| 割集调整（割集 c） | O(d^c·(n−c))，线性内存 | c=20 时几分钟；最坏 c 可达 n−2 |
+| 割集调整（割集 c） | O(d^c·(n−c)·d²)，线性内存 | c=20 时几分钟；最坏 c 可达 n−2 |
 | 树分解（树宽 w） | O(nd^{w+1})，内存指数于 w | 有割集 c 则树宽 ≤ c+1，常更小 |
 
 ## 完整示例
 
-澳大利亚地图着色回溯 + 前向检验（图 6-1/6-7）：变量 WA、NT、SA、Q、NSW、V、T，域 {red, green, blue}，相邻不同色（9 条约束）。
+澳大利亚地图着色回溯 + 前向检验（图 6-1/6-6/6-7）：变量 WA、NT、SA、Q、NSW、V、T，域 {red, green, blue}，相邻不同色（约束图 9 条边：WA-NT、WA-SA、NT-SA、NT-Q、Q-SA、Q-NSW、SA-NSW、SA-V、NSW-V；T 孤立）。图6-6 给出部分搜索树：根下 WA 三分支（r/g/b），WA=red 下 NT∈{green,blue}，再展开 Q——利用可交换性每层只展开一个变量。
 
 1. WA=red → 前向检验从 NT、SA 的域删 red：NT={g,b}，SA={g,b}。
 2. Q=green → 从 NT、SA、NSW 删 green：NT={b}，SA={b}，NSW={r,b}。
 3. V=blue → 从 NSW、SA 删 blue：NSW={r}，**SA=∅** ← 空域！前向检验立即报告不一致，算法回溯（换 V 的颜色或更早的赋值）。
 4. 配 MRV：第 2 步后 NT、SA 只剩 1 值会被优先选中，完全消除这些变量上的分支——前向检验正是 MRV 所需信息的增量计算。
 
+前向检验域缩减全过程（图6-7，R/G/B=红/绿/蓝，加粗为新赋值）：
+
+| 步骤 | WA | NT | Q | NSW | V | SA | T |
+|---|---|---|---|---|---|---|---|
+| 初始域 | RGB | RGB | RGB | RGB | RGB | RGB | RGB |
+| WA=red 后 | **R** | GB | RGB | RGB | RGB | GB | RGB |
+| Q=green 后 | R | B | **G** | RB | RGB | B | RGB |
+| V=blue 后 | R | B | G | R | **B** | **∅** | RGB |
+
+密码算术（图6-2）：TWO + TWO = FOUR。主变量 F,T,U,W,R,O ∈ {0..9}，辅助进位变量 C1,C2,C3 ∈ {0,1}；约束为 Alldiff(F,T,U,W,R,O) 加四个按列方程：O+O=R+10·C1、C1+W+W=U+10·C2、C2+T+T=O+10·C3、C3=F，且 T≠0、F≠0（不允许前导零）。约束超图（图6-2b）中方块表示高阶约束、圆表示变量。
+
+最少冲突求解 8 皇后（图6-8，两步）：左棋盘随机选中最右列的冲突皇后 Q8，该列各方格冲突数（相互攻击的皇后对数）自上而下为 2,2,1,2,3,1,2（当前在底行），两格同为最小值 1，随机取 Q8=3；中棋盘再选 Q6，列上冲突数为 3,3,—,2,3,2,3,0，移至第 8 行（0 冲突）即得右棋盘的解。
+
 互补视角：
 - 冲突与回跳：按 Q,NSW,V,T,SA,WA,NT 顺序赋值，Q=r,NSW=g,V=b,T=r 后 SA 无值——时序回溯会去改 T（塔斯马尼亚！）；SA 的冲突集 {Q,NSW,V} 指向真凶，回跳直达 V。
 - 约束学习：{WA=red, NT=green, Q=blue} 是 no-good（SA 必无值），若外层还对 V、T 赋值，则缓存它可避免反复撞墙。
-- 结构：删去 SA 后约束图成为两棵树组成的森林（图 6-12）——SA 是大小 1 的环割集，固定 SA=red 后整树 O(nd²) 解出，对所有 SA 取值共 d^1 次即可；树分解（图 6-13）把图拆成 {SA,NT,WA}、{SA,NT,Q} 等节点（取三元组值），树宽 2。
+- 结构：删去 SA 后约束图成为两棵树组成的森林（图 6-12）——SA 是大小 1 的环割集，固定 SA=red 后整树 O(nd²) 解出，对所有 SA 取值共 d^1 次即可；树分解（图 6-13）把图拆成 {WA,NT,SA}、{NT,Q,SA}、{Q,SA,NSW}、{SA,NSW,V}、{T} 五个节点（各取该变量组的联合值），最大节点含 3 个变量 ⇒ 树宽 2。
 
 ## 要点
 1. 形式化为 CSP 的三大回报：表示自然、通用求解器高效、约束传播一次砍掉大片空间（选 SA=blue 后邻居组合从 3^5=243 降到 2^5=32，省 87%）。

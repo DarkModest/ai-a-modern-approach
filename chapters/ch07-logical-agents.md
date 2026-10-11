@@ -45,44 +45,147 @@
 - **SATplan 公理不全**：不写"智能体同一时刻只能在一个位置"、前提公理、动作排除公理，SAT 求解器会找出"同时位于两处""没箭也能射"的假规划——但这也是调试知识库缺失知识的利器。
 
 ## 算法要点
-**真值表枚举（TT-Entails?）**：递归地对每个符号赋 true/false；若部分模型已使 KB 为假则剪枝；PL-True?(s, m) 递归求值语句。n 个符号 → 2ⁿ 模型，空间 O(n)。
+**TT-Entails?（图7-10，真值表枚举判定蕴含）**：
+```
+function TT-ENTAILS?(KB, α) returns true/false
+  symbols ← KB 和 α 中的命题符号列表
+  return TT-CHECK-ALL(KB, α, symbols, {})
+function TT-CHECK-ALL(KB, α, symbols, model) returns true/false
+  if EMPTY?(symbols) then
+    if PL-TRUE?(KB, model) then return PL-TRUE?(α, model)
+    else return true        // 当 KB 为 false 时，始终返回 true
+  else
+    P ← FIRST(symbols); rest ← REST(symbols)
+    return TT-CHECK-ALL(KB, α, rest, model∪{P=true}) and
+           TT-CHECK-ALL(KB, α, rest, model∪{P=false})
+```
+深度优先递归（and 是伪代码语言的关键字而非逻辑算符）；部分模型已使 KB 为假即剪枝。n 个符号 → 2ⁿ 模型，时间 O(2ⁿ)、空间 O(n)。
 
-**CNF 转换四步**（归结前置）：
-1. 消去 ⇔：P⇔Q → (P⇒Q)∧(Q⇒P)
-2. 消去 ⇒：P⇒Q → ¬P∨Q
-3. ¬ 内移：双重否定律、德摩根律，直到 ¬ 只在文字前
-4. 用分配律对 ∧ 分配 ∨
+**CNF 转换四步**（归结前置）：①消去 ⇔：P⇔Q → (P⇒Q)∧(Q⇒P)；②消去 ⇒：P⇒Q → ¬P∨Q；③¬ 内移：双重否定律、德摩根律，直到 ¬ 只在文字前；④用分配律对 ∧ 分配 ∨。
 
-**归结规则**：两个子句 (l₁∨…∨lₖ) 与 (m₁∨…∨mₙ)，其中 lᵢ 与 mⱼ 互补，归结句为除这对文字外所有文字的析取（去重复文字=因子提取）。单元归结是其特例（一个子句是单元子句）。PL-Resolution 反复归结直至空子句（KB ⊨ α）或饱和（不蕴含）。完备性由**基本归结定理**保证：子句集不可满足 ⇔ 其归结闭包含空子句。
+**归结规则**：两子句中互补文字 lᵢ 与 mⱼ 消去，其余文字析取（去重=因子提取）；单元归结是特例。完备性由**基本归结定理**保证：子句集不可满足 ⇔ 其归结闭包含空子句。
 
-**DPLL 三改进**：
-1. **早期终止**：任一文字真则子句真；所有文字假则子句假——即使模型未完成
-2. **纯符号启发式**：符号在未满足子句中只以正（或只以负）出现，则赋值使其为真
-3. **单元子句启发式**：子句只剩一个未赋假文字则强制赋值，级联触发**单元传播**（确定子句下等价于前向链接）
+**PL-Resolution（图7-13，命题归结）**：
+```
+function PL-RESOLUTION(KB, α) returns true/false
+  clauses ← KB∧¬α 的 CNF 表示的子句集合
+  new ← {}
+  while true do
+    for each 子句对 Cᵢ, Cⱼ in clauses do
+      resolvents ← PL-RESOLVE(Cᵢ, Cⱼ)   // 返回两输入归结出的所有可能子句
+      if resolvents 包含空子句 then return true
+      new ← new ∪ resolvents
+    if new ⊆ clauses then return false
+    clauses ← clauses ∪ new
+```
 
-**前向链接（PL-FC-Entails?）**：队列存已知未处理符号；count 表记录每个蕴涵式未证明前提数；处理符号 p 时为其所在前提减 1，count=0 则结论入队；inferred 表防循环。线性时间；到达不动点时推得的原子集构成 KB 的一个模型，故完备（对原子查询）。
+**PL-FC-Entails?（图7-15，前向链接，输入为确定子句集）**：
+```
+function PL-FC-ENTAILS?(KB, q) returns true/false
+  count ← 表，count[c] 为子句 c 的前提符号数量
+  inferred ← 表，初始对所有符号为 false
+  queue ← 符号队列，初始为 KB 中已知为 true 的符号
+  while queue 不空 do
+    p ← POP(queue)
+    if p = q then return true
+    if inferred[p] = false then
+      inferred[p] ← true
+      for each 前提中出现 p 的子句 c do
+        count[c] 减 1
+        if count[c] = 0 then 将 c.CONCLUSION 加入 queue
+  return false
+```
+线性时间；到达不动点时推得的原子集构成 KB 的一个模型，故对原子查询完备。
 
-**WalkSAT**：随机选一个未满足子句，以概率 p 随机翻转其中任一符号（随机游走），否则翻转使未满足子句数最少的符号（最小冲突）。
+**DPLL-Satisfiable?（图7-17）**：
+```
+function DPLL-SATISFIABLE?(s) returns true/false
+  clauses ← s 的 CNF 子句集；symbols ← s 中的命题符号列表
+  return DPLL(clauses, symbols, {})
+function DPLL(clauses, symbols, model) returns true/false
+  if 在 model 中每个子句都为 true then return true
+  if 在 model 中 clauses 中某个子句为 false then return false
+  P, value ← FIND-PURE-SYMBOL(symbols, clauses, model)
+  if P 非空 then return DPLL(clauses, symbols−P, model∪{P=value})
+  P, value ← FIND-UNIT-CLAUSE(clauses, model)
+  if P 非空 then return DPLL(clauses, symbols−P, model∪{P=value})
+  P ← FIRST(symbols); rest ← REST(symbols)
+  return DPLL(clauses, rest, model∪{P=true}) or
+         DPLL(clauses, rest, model∪{P=false})
+```
+三改进：**早期终止**（任一文字真则子句真、所有文字假则子句假，模型未完成也可判定）；**纯符号启发式**（在未满足子句中只以正/只以负出现的符号直接赋值使其为真）；**单元子句启发式**（只剩一个未赋真文字的子句强制赋值，级联触发**单元传播**，确定子句下等价于前向链接）。
 
-**SATplan**：构建"初始状态 ∨ 到 t 为止的后继状态公理 ∨ t 时刻目标"的合取语句交给 SAT 求解器；从模型中读出为真的动作变量即得规划；从 t=1 递增尝试保证最短规划；仅适用于完全可观测/无传感器环境。
+**WalkSAT（图7-18，随机翻转检验可满足性）**：
+```
+function WALKSAT(clauses, p, max_flips) returns 满足的模型或 failure
+  model ← 对 clauses 中的符号随机赋值 true/false
+  for i = 1 to max_flips do
+    if model 满足 clauses then return model
+    clause ← 从 clauses 中随机选择的在 model 中为 false 的子句
+    if RANDOM(0,1) ≤ p then 在 model 中翻转一个从 clause 中随机选择的符号的值
+    else 翻转 clause 中的符号以最大化已满足子句的数量
+  return failure
+```
+p 通常约 0.5；返回模型即可满足，返回 failure 则无法判定（不可满足或需更多翻转）。
+
+**SATPlan（图7-22）**：
+```
+function SATPLAN(init, transition, goal, T_max) returns 解或 failure
+  for t = 0 to T_max do
+    cnf ← TRANSLATE-TO-SAT(init, transition, goal, t)
+    model ← SAT-SOLVER(cnf)
+    if model 非空 then return EXTRACT-SOLUTION(model)
+  return failure
+```
+目标断言在时刻 t 成立、到 t 为止每步含后继状态公理；从模型中为真的动作命题符号提取规划；t 递增保证最短规划；仅适用完全可观测/无传感器环境。
 
 ## 参考表
-5 个联结词语义（P、Q 为任意子句，任一模型 m 中）：
+命题逻辑 BNF 文法（图7-7）：
+```
+语句 → 原子语句 | 复合语句
+原子语句 → True | False | P | Q | R | …
+复合语句 → (语句) | ¬语句 | 语句∧语句 | 语句∨语句 | 语句⇒语句 | 语句⇔语句
+运算符优先级（高→低）：¬, ∧, ∨, ⇒, ⇔
+```
 
-| 联结词 | 语句 | 为真条件 |
-|---|---|---|
-| ¬ 非 | ¬P | P 在 m 中为假 |
-| ∧ 与 | P∧Q | P 与 Q 均真 |
-| ∨ 或（相容） | P∨Q | 至少一真 |
-| ⇒ 蕴涵 | P⇒Q | 除 P 真而 Q 假外均为真 |
-| ⇔ 当且仅当 | P⇔Q | P、Q 同真或同假 |
+5 个联结词真值表（图7-8）：
+
+| P | Q | ¬P | P∧Q | P∨Q | P⇒Q | P⇔Q |
+|---|---|---|---|---|---|---|
+| false | false | true | false | false | true | true |
+| false | true | true | false | true | true | false |
+| true | false | false | false | true | false | false |
+| true | true | false | true | true | true | true |
+
+标准逻辑等价（图7-11，α、β、γ 为任意语句）：
+
+| 等价式 | 名称 |
+|---|---|
+| (α∧β) ≡ (β∧α)；(α∨β) ≡ (β∨α) | ∧、∨ 交换律 |
+| ((α∧β)∧γ) ≡ (α∧(β∧γ))；((α∨β)∨γ) ≡ (α∨(β∨γ)) | ∧、∨ 结合律 |
+| ¬(¬α) ≡ α | 双重否定律 |
+| (α⇒β) ≡ (¬β⇒¬α) | 假言易位 |
+| (α⇒β) ≡ (¬α∨β) | 蕴涵消去 |
+| (α⇔β) ≡ ((α⇒β)∧(β⇒α)) | 等价消去 |
+| ¬(α∧β) ≡ (¬α∨¬β)；¬(α∨β) ≡ (¬α∧¬β) | 德摩根律 |
+| (α∧(β∨γ)) ≡ ((α∧β)∨(α∧γ))；(α∨(β∧γ)) ≡ ((α∨β)∧(α∨γ)) | ∧对∨、∨对∧ 分配律 |
+
+CNF/霍恩/确定/目标子句文法（图7-12）：
+```
+CNF语句 → 子句₁ ∧ ⋯ ∧ 子句ₙ        子句 → 文字₁ ∨ ⋯ ∨ 文字ₘ
+事实 → 符号                        文字 → 符号 | ¬符号
+符号 → P | Q | R | …
+霍恩子句范式 → 确定子句范式 | 目标子句范式
+确定子句范式 → Fact | (符号₁∧⋯∧符号ₗ) ⇒ 符号
+目标子句范式 → (符号₁∧⋯∧符号ₗ) ⇒ False
+```
 
 关键语义桥接：
 
 | 命题 | 等价刻画 |
 |---|---|
 | KB ⊨ α | M(KB) ⊆ M(α) |
-| KB ⊨ α | KB ⇒α 有效（演绎定理） |
+| KB ⊨ α | KB ⇒ α 有效（演绎定理） |
 | KB ⊨ α | KB∧¬α 不可满足（反证法） |
 | α 有效 | ¬α 不可满足 |
 | α、β 等价 | M(α)=M(β)，即互相蕴含 |
@@ -95,9 +198,13 @@
 - R4：¬B₁,₁（在 [1,1] 无感知）
 - R5：B₂,₁（在 [2,1] 感知微风）
 
-模型检验视角：7 个符号 128 个模型，KB 仅在 3 个中为真，其中 P₁,₂ 均为假 ⇒ KB ⊨ ¬P₁,₂；P₂,₂ 在 2 个为真 1 个为假 ⇒ 均不可判定。
+模型检验视角（图7-5、图7-9）：只关心 [1,2]、[2,2]、[3,1] 三格的无底洞时有 8 个可能模型；KB（[1,1] 无观测、[2,1] 有微风）仅在其中 3 个为真（实线圈出）。(a) 虚线是 α₁=¬P₁,₂ 的模型——3 个 KB 模型全在其中，故 KB ⊨ ¬P₁,₂；(b) 虚线是 α₂=¬P₂,₂ 的模型——3 个 KB 模型中只有 2 个在其中（P₂,₂ 在 1 个为真），故 α₂ 与 ¬α₂ 均不可判定。枚举全部 7 个符号则是 128 行真值表，KB 只在 3 行为真（图7-9 最右列下划线标出）。
 
-定理证明（5 步推出 ¬P₁,₂ ∧ ¬P₂,₁）：①对 R2 等价消去得 ¬B₁,₁ ⇒ ¬(P₁,₂∨P₂,₁)；②对 R4 合取消去；③假言易位；④对 R8 与感知 R4 用肯定前件得 ¬(P₁,₂∨P₂,₁)；⑤德摩根律得 ¬P₁,₂ ∧ ¬P₂,₁。证明只涉及相关命题，与知识库大小无关。
+定理证明（5 步推出 ¬P₁,₂ ∧ ¬P₂,₁）：①对 R2 等价消去得 R6：(B₁,₁⇒(P₁,₂∨P₂,₁))∧((P₁,₂∨P₂,₁)⇒B₁,₁)；②对 R6 合取消去得 R7：(P₁,₂∨P₂,₁)⇒B₁,₁；③对 R7 假言易位得 R8：¬B₁,₁⇒¬(P₁,₂∨P₂,₁)；④对 R8 与感知 R4 用肯定前件得 ¬(P₁,₂∨P₂,₁)；⑤德摩根律得结论。证明只涉及相关命题，与知识库大小无关。
+
+归结证明（图7-14）：对 KB∧¬α（¬α 即 P₁,₂）转 CNF 后运用 PL-Resolution。顶行子句 ¬P₂,₁∨B₁,₁、¬B₁,₁∨P₁,₂∨P₂,₁、¬P₁,₂∨B₁,₁、¬B₁,₁ 与 P₁,₂ 反复成对归结（多数归结句是 ¬B₁,₁∨P₁,₂∨B₁,₁、P₁,₂∨P₂,₁∨¬P₂,₁ 之类的重言式），关键路径推出 ¬P₂,₁ 与 ¬P₁,₂，最终 ¬P₁,₂ 与被否定的目标 P₁,₂ 归结出空子句。
+
+前向链接示例（图7-16）：霍恩子句集 P⇒Q、L∧M⇒P、B∧L⇒M、A∧P⇒L、A∧B⇒L、A、B，对应与或图（弧线连接同一蕴涵式的多个前提）。从事实 A、B 出发，前向链接依次推得 L、M、P，最终推得查询 Q。
 
 后续（图 7-4a）：在 [1,2] 感知臭味无微风，加入 S₁,₂、¬B₁,₂ 后可推得 W₁,₃（wumpus 位置）与 P₃,₁（无底洞在 [3,1]）——一次结合不同时间、不同地点信息的推断。带上流与后继状态公理（如 HaveArrowᵗ⁺¹ ⇔ (HaveArrowᵗ ∧ ¬Shootᵗ)）后，智能体可回答"我现在在哪、哪些方格 OK"，与 A* 结合构成混合智能体。
 
@@ -107,11 +214,12 @@
 3. 证明可以比枚举便宜：证明只触碰相关命题，模型检验必须遍历 2ⁿ 空间；反过来模型很多但证明很短时定理证明占优。
 4. 限制语言换来效率：确定子句 KB 上前向/反向链接线性时间，这是逻辑编程（Prolog）的根基。
 5. 写动态公理时按流不按动作：后继状态公理把 O(mn) 的框架公理压到 O(mk)，代价是公理变长。
-6. 随机 3-CNF 在子句/符号比 ≈ 4.3 处有相变，最难实例集中在阈值附近——欠约束问题易猜中解，过约束问题易排除，阈值问题最难。
+6. 随机 3-CNF 在子句/符号比 ≈ 4.3 处有相变（图7-19：可满足概率在该比值附近从≈1 骤降到≈0，DPLL 与 WalkSAT 的运行时间中位数也都在阈值附近达到峰值），最难实例集中在阈值附近——欠约束问题易猜中解，过约束问题易排除，阈值问题最难。
 7. 逻辑状态估计用 1-CNF 信念状态做保守近似：每步只保留可证明的文字，保证为真但可能丢失析取信息（如 P₃,₁∨P₂,₂）。
 
 ## 关联
-- **第3章/第4章**：基于知识的智能体是第 2 章内部状态智能体的推广；证明搜索可形式化为搜索问题（初始=KB，动作=推断规则，目标=待证语句）。
+- **第2章**：基于知识的智能体是内部状态智能体的推广（KB 即紧凑表示的世界状态与规则）。
+- **第3章/第4章**：证明搜索可形式化为搜索问题（初始=KB，动作=推断规则，目标=待证语句）；逻辑状态估计延续第4章的信念状态维护。
 - **第6章**：DPLL 是 CSP 回溯搜索的对应物（分量分析、MRV 度启发式、冲突学习一一对应）；WalkSAT 对应最小冲突局部搜索。
 - **第8章**：命题逻辑无法表达"对所有方格、所有时刻"，推动一阶逻辑登场——任意大小的 wumpus 世界用约 10 条一阶语句即可描述。
 - **第9章**：一阶逻辑的推断算法（含归结、前向链接与逻辑编程）。

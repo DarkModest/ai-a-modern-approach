@@ -53,16 +53,52 @@
 - **前向状态空间搜索**：状态＝基本流集合；适用动作＝把当前状态与每个模式的前提合一，对每个成功置换实例化出基本动作；用 A*／贪心最佳优先配自动启发式。
 - **反向（回归）搜索**：选相关动作 a（效果与 g 中文字合一带标准化分离的变量置换，且 a 的效果不否定 g）；g′ = (g − Add(a)) ∪ Pre(a)；含变量时注意标准化分离以防变量名冲突。
 - **SATPlan 翻译六步**：命题化动作 → 排斥公理 A_t ⇒ ¬B_t → 前提公理 A_t ⇒ Pre → Init 断言（未提及流断言为假）→ 目标基本实例析取 → 后继状态公理。
-- **分层搜索（广度优先版）**：
+- **分层前向规划搜索（图 11-8，广度优先实现）**：最初提供给算法的规划是 [Act]；Refinements 函数返回一个动作序列集——HLA 的每个由状态 outcome 满足其前提的细化对应一个序列。
   ```
-  Hierarchical-Search(plan):
-    if plan 全为基元且达成目标: return plan
-    h ← plan 中第一个非基元 HLA
-    for R in Refinements(h, 当前状态满足前提者):
-      Hierarchical-Search(plan 中以 R 替换 h)
+  function Hierarchical-Search(problem, hierarchy) returns 一个解或failure
+    frontier ← 一个元素仅为[Act]的先入先出队列
+    while true do
+      if Is-Empty(frontier) then return failure
+      plan ← Pop(frontier)                    // 选择frontier中最浅的plan
+      hla ← plan中的第一个HLA，若无则为null
+      prefix, suffix ← plan中hla之前和之后的动作序列
+      outcome ← Result(problem.Initial, prefix)
+      if hla为null then                       // plan是基元的且结果为outcome
+        if problem.Is-Goal(outcome) then return plan
+      else for each sequence in Refinements(hla, outcome, hierarchy) do
+        添加 Append(prefix, sequence, suffix) 到frontier
   ```
   复杂度：解 d 个基元动作、每非基元动作 r 个细化、每细化 k 步，则细化树数约 r^{(d−1)/(k−1)}——小 r 大 k 时指数变 k 次方根。
-- **天使搜索**：对高层规划计算乐观／悲观可达集；悲观∩目标 ≠ ∅ ⇒ 可行（专注并按回归分解为子问题细化）；乐观∩目标 = ∅ ⇒ 剪除；两者之间 ⇒ 继续细化消除不确定性（Making-Progress 谓词防无限回归）。
+- **天使语义分层规划（图 11-11）**：用天使语义识别并执行可行的高层规划、避免不可行高层规划；谓词 Making-Progress 检查并确保不会陷入细化的无限回归。
+  ```
+  function Angelic-Search(problem, hierarchy, initialPlan) returns 解或fail
+    frontier ← 一个initialPlan为唯一元素的先入先出队列
+    while true do
+      if Empty?(frontier) then return fail
+      plan ← Pop(frontier)                    // 选择frontier中最浅的节点
+      if Reach⁺(problem.Initial, plan)与problem.Goal相交 then
+        if plan是基元的 then return plan      // Reach⁺对于基元规划是精确的
+        guaranteed ← Reach⁻(problem.Initial, plan) ∩ problem.Goal
+        if guaranteed ≠ {} 且Making-Progress(plan, initialPlan) then
+          finalState ← guaranteed中的任意元素
+          return Decompose(hierarchy, problem.Initial, plan, finalState)
+        hla ← plan中的某个HLA
+        prefix, suffix ← plan中hla之前和之后的动作序列
+        outcome ← Result(problem.Initial, prefix)
+        for each sequence in Refinements(hla, outcome, hierarchy) do
+          将 Append(prefix, sequence, suffix) 添加到frontier
+
+  function Decompose(hierarchy, s₀, plan, s_f) returns 一个解
+    solution ← 空规划
+    while plan非空 do
+      action ← Remove-Last(plan)
+      s_i ← Reach⁻(s₀, plan)中的一个状态，使得 s_f ∈ Reach⁺(s_i, action)
+      problem ← 一个Initial=s_i且Goal=s_f的问题
+      solution ← Append(Angelic-Search(problem, hierarchy, action), solution)
+      s_f ← s_i
+    return solution
+  ```
+  判定规则：乐观可达集与目标不相交 ⇒ 规划行不通（剪除）；悲观可达集与目标相交 ⇒ 规划有效（Decompose 按回归分解为子问题细化）；两者之间的中间地带 ⇒ 继续细化以消除不确定性。
 - **信念状态更新（无传感器）**：b′ = (b − Del(a)) ∪ Add(a)，未知文字：动作添加则为真、删除则为假、不影响则保持未知；应变规划在动作更新后再用感知模式并入感知文字（其前提需以析取并入）。
 - **CPM**：拓扑序前向算 ES、反向算 LS；资源约束下用最小松弛（minimum slack）贪婪启发式（同 MRV 思想；对装配例得 130 分钟而非最优 115 分钟）。
 
@@ -88,26 +124,80 @@
 | 目标监视 | 是否有更好的目标集 | 最主动 |
 
 ## 完整示例
-航空货物运输（图 11-1，3 个动作模式、2 个谓词）：
+航空货物运输（图 11-1，3 个动作模式）：
 
 ```
-Init: At(C1,SFO) ∧ At(C2,JFK) ∧ At(P1,SFO) ∧ At(P2,JFK)
-Goal: At(C1,JFK) ∧ At(C2,SFO)
+Init(At(C1,SFO) ∧ At(C2,JFK) ∧ At(P1,SFO) ∧ At(P2,JFK)
+     ∧ Cargo(C1) ∧ Cargo(C2) ∧ Plane(P1) ∧ Plane(P2)
+     ∧ Airport(JFK) ∧ Airport(SFO))
+Goal(At(C1,JFK) ∧ At(C2,SFO))
 
-Action(Load(c,p,a)):
-  Pre: At(c,a) ∧ At(p,a)
-  Eff: In(c,p) ∧ ¬At(c,a)
-Action(Unload(c,p,a)):
-  Pre: In(c,p) ∧ At(p,a)
-  Eff: At(c,a) ∧ ¬In(c,p)
-Action(Fly(p,f,t)):
-  Pre: At(p,f) ∧ Plane(p)
-  Eff: At(p,t) ∧ ¬At(p,f)
+Action(Load(c,p,a),
+  Precond: At(c,a) ∧ At(p,a) ∧ Cargo(c) ∧ Plane(p) ∧ Airport(a)
+  Effect: ¬At(c,a) ∧ In(c,p))
+Action(Unload(c,p,a),
+  Precond: In(c,p) ∧ At(p,a) ∧ Cargo(c) ∧ Plane(p) ∧ Airport(a)
+  Effect: At(c,a) ∧ ¬In(c,p))
+Action(Fly(p,from,to),
+  Precond: At(p,from) ∧ Plane(p) ∧ Airport(from) ∧ Airport(to)
+  Effect: ¬At(p,from) ∧ At(p,to))
 ```
 
 关键建模约定：PDDL 无全称量词，故规定"In 飞机内的货物不同时 At 任何地方"——At 的真正含义是"在给定地点可用"；货物随机飞行、卸载后才 At 新机场。
-解（6 步）：Load(C1,P1,SFO); Fly(P1,SFO,JFK); Unload(C1,P1,JFK); Load(C2,P2,JFK); Fly(P2,JFK,SFO); Unload(C2,P2,SFO)。
-同族示例：备用轮胎问题（4 动作，解为 Remove(Flat,Axle); Remove(Spare,Trunk); PutOn(Spare,Axle)）；积木世界（Move 需 Clear(b)∧Clear(y)，y=Table 时 Clear 语义改为"有容身空间"并另设 MoveToTable，或加 Block(b)∧Block(y) 前提防冗余）。
+解（6 步）：[Load(C1,P1,SFO), Fly(P1,SFO,JFK), Unload(C1,P1,JFK), Load(C2,P2,JFK), Fly(P2,JFK,SFO), Unload(C2,P2,SFO)]。
+
+备用轮胎问题（图 11-2；注意 LeaveOvernight 是"世界捣乱"动作）：
+
+```
+Init(Tire(Flat) ∧ Tire(Spare) ∧ At(Flat,Axle) ∧ At(Spare,Trunk))
+Goal(At(Spare,Axle))
+Action(Remove(obj,loc),
+  Precond: At(obj,loc)
+  Effect: ¬At(obj,loc) ∧ At(obj,Ground))
+Action(PutOn(t,Axle),
+  Precond: Tire(t) ∧ At(t,Ground) ∧ ¬At(Flat,Axle) ∧ ¬At(Spare,Axle)
+  Effect: ¬At(t,Ground) ∧ At(t,Axle))
+Action(LeaveOvernight,
+  Precond: （空）
+  Effect: ¬At(Spare,Ground) ∧ ¬At(Spare,Axle) ∧ ¬At(Spare,Trunk)
+        ∧ ¬At(Flat,Ground) ∧ ¬At(Flat,Axle) ∧ ¬At(Flat,Trunk))
+```
+
+积木世界（图 11-4，建造 A 在 B 上、B 在 C 上的塔；一个解是 [MoveToTable(C,A), Move(B,Table,C), Move(A,Table,B)]）：
+
+```
+Init(On(A,Table) ∧ On(B,Table) ∧ On(C,A)
+     ∧ Block(A) ∧ Block(B) ∧ Block(C) ∧ Clear(B) ∧ Clear(C) ∧ Clear(Table))
+Goal(On(A,B) ∧ On(B,C))
+Action(Move(b,x,y),
+  Precond: On(b,x) ∧ Clear(b) ∧ Clear(y) ∧ Block(b) ∧ Block(y) ∧
+           (b≠x) ∧ (b≠y) ∧ (x≠y)
+  Effect: On(b,y) ∧ Clear(x) ∧ ¬On(b,x) ∧ ¬Clear(y))
+Action(MoveToTable(b,x),
+  Precond: On(b,x) ∧ Clear(b) ∧ Block(b) ∧ Block(x)
+  Effect: On(b,Table) ∧ Clear(x) ∧ ¬On(b,x))
+```
+
+建模细节：Clear(y) 意为"y 上方有容身空间"；Table 永远 Clear，故另设 MoveToTable（若给 Move 加 Block(b)∧Block(y) 前提，也可阻止把积木堆到桌子这种冗余动作）。
+
+HLA 细化示例（图 11-7："前往旧金山机场"与真空吸尘器世界的递归导航）：
+
+```
+Refinement(Go(Home,SFO),
+  Steps: [Drive(Home,SFOLongTermParking), Shuttle(SFOLongTermParking,SFO)])
+Refinement(Go(Home,SFO),
+  Steps: [Taxi(Home,SFO)])
+
+Refinement(Navigate([a,b],[x,y]),
+  Precond: a=x ∧ b=y
+  Steps: [])
+Refinement(Navigate([a,b],[x,y]),
+  Precond: Connected([a,b],[a−1,b])
+  Steps: [Left, Navigate([a−1,b],[x,y])])
+Refinement(Navigate([a,b],[x,y]),
+  Precond: Connected([a,b],[a+1,b])
+  Steps: [Right, Navigate([a+1,b],[x,y])])
+```
 
 ## 要点
 1. 因子化表示是规划的力量之源：一个 Fly 模式＝4Tn² 条命题公理，且无须领域特定启发式。

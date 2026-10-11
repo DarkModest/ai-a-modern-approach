@@ -59,7 +59,35 @@ P(w_{1:N}) = ∏ P(w_i | 前 n−1 词)。计数估计后做线性插值回退�
 转移 P(C_i|C_{i−1})（Penn Treebank 中 13124 个 MD 里 10471 个后接 VB，故 P(VB|MD)≈0.8）；传感器 P(w|C)（P(would|MD)=0.1）。维特比找最可能词性序列，精度约 97%。判别式：每词性一个逻辑斯谛回归模型，特征如 w_{i−1}="I"、w_i 以 "ous" 结尾、c_{i−1}=IN、w_{i−2} 属过去时等百万级稀疏二值特征，贪心左到右标注。
 
 **CYK / PCFG 句法分析**
-文法先转乔姆斯基范式。表 P[X,i,k] = words_{i:k} 构成范畴 X 的最可能树的概率，按区间长度递增填表，枚举所有分裂点 (i,j,k) 组合双子区间；空间 O(n²m)、时间 O(n³m)（n 词数、m 非终结符数）。加速：A* 搜索（状态=项目表，代价=已用规则概率倒数，可采纳启发式保证首个结果最优）；束搜索 O(n)；b=1 即确定性移位减少分析器（shift-reduce，逐词移栈或归约栈顶）。
+文法先转乔姆斯基范式（词法规则 X → word [p]；句法规则 X → Y Z [p]，右侧恰两范畴）。图23-5 CYK-Parse 逐行转录：
+
+```
+function CYK-PARSE(words, grammar) returns 句法分析树表
+inputs: words 单词列表；grammar 含 LexicalRules 与 GrammarRules 结构
+T ← 一个表    // T[X,i,k] 是涵盖 words_{i:k} 的最可能的 X 树
+P ← 一个表，初始全为 0   // P[X,i,k] 表示树 T[X,i,k] 的概率
+// 为每个单词插入词汇范畴
+for i = 1 to LEN(words) do
+    for each (X, p) in grammar.LEXICALRULES(words_i) do
+        P[X,i,i] ← p
+        T[X,i,i] ← TREE(X, words_i)
+// 通过 Y_{i:j} + Z_{j+1:k} 构建 X_{i:k}，最短区间优先
+for each (i, j, k) in SUBSPANS(LEN(words)) do
+    for each (X, Y, Z, p) in grammar.GRAMMARRULES do
+        PYZ ← P[Y,i,j] × P[Z,j+1,k] × p
+        if PYZ > P[X,i,k] do
+            P[X,i,k] ← PYZ
+            T[X,i,k] ← TREE(X, T[Y,i,j], T[Z,j+1,k])
+return T
+
+function SUBSPANS(N) yields (i,j,k) 元组   // i≤j<k，按区间长度递增
+for length = 2 to N do
+    for i = 1 to N+1−length do
+        k ← i+length−1
+        for j = i to k−1 do
+            yield (i, j, k)
+```
+空间 O(n²m)、时间 O(n³m)（n 词数、m 非终结符数）。加速：A* 搜索（状态=项目表，代价=已用规则概率倒数，可采纳启发式保证首个结果最优）；束搜索 O(n)；b=1 即确定性移位减少分析器（shift-reduce，逐词移栈或归约栈顶）。
 
 **语义分析管道**
 E0 文法 + 组合语义：算术文法给 "3+(4÷2)" 的树根标 Exp(5)；英语中 NP "Ali" → 逻辑项 Ali，VP "loves Bo" → 谓词 λx. Loves(x,Bo)，规则 S(pred(n)) → NP(n) VP(pred)，函数应用归约得 Loves(Ali,Bo)。扩展：时态用事件演算（loves ↔ During(Now, Extent(e))，loved ↔ After）。学习：Zettlemoyer & Collins 从句子-逻辑形式对学文法（79% 准确率）；问答对数据更易得，可训练更好的分析器（Liang et al.）。
@@ -83,24 +111,59 @@ E0 文法 + 组合语义：算术文法给 "3+(4÷2)" 的树根标 Exp(5)；英�
 | Witten-Bell、Kneser-Ney | 更精细的折扣 | 更复杂 |
 | stupid backoff | 简单回退 + 超大语料 | 目标相同：减方差 |
 
-歧义消解四模型：世界模型（命题在世界上发生的可能性）、心理模型（说话者意图的可能性）、语言模型（给定意图选词串的可能性）、声学模型（给定词串出声音的可能性）。
+图23-2 E0 文法（每规则带概率与示例短语）：
+
+| 左部 | 展开（概率，示例） |
+|---|---|
+| S | → NP VP [0.90] "I+feel a breeze" ｜ S Conj S [0.10] "I feel a breeze+and+It stinks" |
+| NP | → Pronoun [0.25] I ｜ Name [0.10] Ali ｜ Noun [0.10] pits ｜ Article Noun [0.25] the+wumpus ｜ Article Adjs Noun [0.05] ｜ Digit Digit [0.05] 3 4 ｜ NP PP [0.10] ｜ NP RelClause [0.05] ｜ NP Conj NP [0.05] |
+| VP | → Verb [0.40] stinks ｜ VP NP [0.35] feel+a breeze ｜ VP Adjective [0.05] ｜ VP PP [0.10] ｜ VP Adverb [0.10] |
+| Adjs | → Adjective [0.80] ｜ Adjective Adjs [0.20] |
+| PP | → Prep NP [1.00] to+the east |
+| RelClause | → RelPro VP [1.00] that+is smelly |
+
+图23-3 E0 词典（每类概率和为 1；名词/名称/动词/形容词/副词为开放类，其余封闭类）：
+
+| 范畴 | 词条（概率） |
+|---|---|
+| Noun | stench [0.05]｜breeze [0.10]｜wumpus [0.15]｜pits [0.05]｜… |
+| Verb | is [0.10]｜feel [0.10]｜smells [0.10]｜stinks [0.05]｜… |
+| Article | the [0.40]｜a [0.30]｜an [0.10]｜every [0.05]｜… |
+| Pronoun | me [0.10]｜you [0.03]｜I [0.10]｜it [0.10]｜… |
+| 其余 | Adjective: right [0.10]、dead [0.05]…；Adverb: here [0.05]、ahead [0.05]…；RelPro: that [0.40]、which [0.15]…；Name: Ali/Bo [0.01]…；Prep: to [0.20]、in [0.10]、near [0.10]…；Conj: and [0.50]、but [0.20]…；Digit: 0–4 各 [0.20]… |
+
+图23-1 Penn Treebank 词性标签（45 个，各带示例词）：动词 VB talk／VBD talked／VBG talking／VBN／VBP／VBZ talks；名词 NN kitten／NNS kittens／NNP Ali／NNPS Fords；JJ purple／JJR／JJS；RB quickly／RBR／RBS、小品词 RP off；PRP you／PRP$ your／WP who／WP$ whose；DT the／PDT all／WDT which；MD should；IN of；TO to；CC and；CD three；EX there；FW per se；LS 1；UH eureka；SYM +；POS 's；标点 $ # “ ” ( ) , : . 等。
+
+词汇化 PCFG 片段（正文无编号图）：VP(v) → Verb(v) NP(n) [P1(v,n)] ｜ VP(v) → Verb(v) [P2(v)]；NP(n) → Article(a) Adjs(j) Noun(n) [P3(n,a)]；NP(n) → NP(n) Conjunction(c) NP(m) [P4(n,c,m)]；Verb(ate) → ate [0.002]；Noun(banana) → banana [0.0007]。P1 是 5000 动词×10000 名词的大表，靠平滑回退到仅依赖 v。
+
+扩展文法片段（图23-9，省略概率）：S(v) → NP(Sbj,pn,n) VP(pn,v)；VP(pn,v) → Verb(pn,v) NP(Obj,pn,n)；PP(head) → Prep(head) NP(Obj,pn,h)；Pronoun(Sbj,1S,I) → I；Pronoun(Obj,1S,me) → me；Verb(3S,see) → see。
+
+算术语义文法（图23-10）：Exp(op(x1,x2)) → Exp(x1) Operator(op) Exp(x2)；Exp(x) → ( Exp(x) )；Exp(x) → Number(x)；Number(10×x1+x2) → Number(x1) Digit(x2)；Operator(+) → + 等。
 
 ## 完整示例
-E0 文法下 "Every wumpus smells" 的句法树（书中图 23-6 的线性形式）：
+E0 文法下 "Every wumpus smells" 的句法树（图23-6，内部节点标注规则概率）：
 
 ```
-[S [NP [Article every][Noun wumpus]]
-   [VP [Verb smells]]]
+            S [0.90]
+           /        \
+      NP [0.25]      VP [0.40]
+      /     \          |
+Article[0.05] Noun[0.15] Verb[0.10]
+    |          |         |
+  Every     wumpus    smells
 ```
-每个内部节点标注规则概率，整树概率 = 路径上规则概率之积。
+线性形式：[S [NP [Article every][Noun wumpus]] [VP [Verb smells]]]。整树概率 = 路径上规则概率之积 = 0.9 × 0.25 × 0.05 × 0.15 × 0.40 × 0.10 = 0.0000675。
 
-语义解释 "Ali loves Bo"（λ 演算管线）：
-1. 词汇：NP(Ali) → Ali；动词 loves → λy. λx. Loves(x,y)
-2. VP：loves + Bo → λx. Loves(x, Bo)
-3. 规则：S(pred(n)) → NP(n) VP(pred)
+图23-4 自顶向下分析 "The wumpus is dead" 的项目列表轨迹（每步应用一条规则替换最左非终结符）：
+S →（S→NP VP）NP VP →（VP→VP Adjective）NP VP Adjective →（VP→Verb）NP Verb Adjective →（Adjective→dead）NP Verb dead →（Verb→is）NP is dead →（NP→Article Noun）Article Noun is dead →（Noun→wumpus）Article wumpus is dead →（Article→the）the wumpus is dead。
+
+语义解释 "Ali loves Bo"（图23-12，λ 演算管线）：
+1. 词汇：Name(Ali) → Ali；Verb(λy λx Loves(x,y)) → loves
+2. 规则 VP(pred(n)) → Verb(pred) NP(n)：loves + Bo → λx. Loves(x, Bo)
+3. 规则 S(pred(n)) → NP(n) VP(pred)
 4. 函数应用归约：(λx. Loves(x, Bo))(Ali) ≡ Loves(Ali, Bo)
 
-量词歧义示例："Every agent feels a breeze" 句法分析唯一，语义却有 ∀a∃b Feel(a,b) 与 ∃b∀a Feel(a,b) 两种——交给准逻辑形式处理。
+算术树对照（图23-11）："3 + (4÷2)" 根节点 Exp(5)，语义随句法自底向上组合。量词歧义示例："Every agent feels a breeze" 句法分析唯一，语义却有 ∀a∃b Feel(a,b) 与 ∃b∀a Feel(a,b) 两种——交给准逻辑形式处理。
 
 ## 要点
 1. 先问"这个字符串概率多大"，再问"是否合法"——概率语言模型是各类 NLP 任务的通用积木与基准。

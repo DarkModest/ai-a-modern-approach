@@ -51,28 +51,28 @@
 
 ## 算法要点
 
-爬山（最陡上升）
+爬山（最陡上升，图4-2）
 ```
-function HillClimbing(problem):
-    current ← Initial-State(problem)
-    loop:
-        neighbor ← current 的后继中值最大者
-        if neighbor.Value ≤ current.Value: return current
+function Hill-Climbing(problem) returns 一个位于局部极大值的状态
+    current ← problem.Initial
+    while true do
+        neighbor ← current 的值最大的后继状态
+        if Value(neighbor) ≤ Value(current) then return current
         current ← neighbor
 ```
-内存 O(1)；变体：随机/首选/随机重启（期望重启次数 1/p）。
+内存 O(1)；变体：随机/首选/随机重启（期望重启次数 1/p）。8皇后用完整状态形式化（每列一个皇后，每状态 8×7=56 个后继）；启发式代价 h=相互攻击皇后对数（解 h=0），可把 −h 作为目标函数。
 
-模拟退火
+模拟退火（图4-5）
 ```
-function SimulatedAnnealing(problem, schedule):
-    current ← Initial-State(problem)
-    for t = 1, 2, ...:
+function Simulated-Annealing(problem, schedule) returns 一个解状态
+    current ← problem.Initial
+    for t = 1 to ∞ do
         T ← schedule(t)
-        if T = 0: return current
-        next ← 随机选一个后继
-        ΔE ← next.Value − current.Value
-        if ΔE > 0: current ← next
-        else: current ← next 以概率 e^{ΔE/T}
+        if T = 0 then return current
+        next ← current 的一个随机选择的后继状态
+        ΔE ← Value(next) − Value(current)
+        if ΔE > 0 then current ← next
+        else current ← next 仅以 e^{ΔE/T} 的概率
 ```
 schedule 降温足够慢时以概率1收敛到全局极大（玻尔兹曼分布性质）。
 
@@ -87,60 +87,83 @@ function LocalBeamSearch(problem, k):
 ```
 线程间传递信息："过来，这里的草更绿"，把资源集中到最有进展的路径。
 
-遗传算法
+遗传算法（图4-8）
 ```
-function GeneticAlgorithm(population, fitness):
-    loop:
-        weights ← 各个体适应度
-        新种群 ← 按权重概率选亲本对，随机杂交点交叉产生后代，
-                 每位以突变率翻转；可选精英保留/淘汰
+function Genetic-Algorithm(population, fitness) returns 一个个体
+    repeat
+        weights ← Weighted-By(population, fitness)
+        population2 ← 空列表
+        for i = 1 to Size(population) do
+            parent1, parent2 ← Weighted-Random-Choices(population, weights, 2)
+            child ← Reproduce(parent1, parent2)
+            if (小的随机概率) then child ← Mutate(child)
+            将 child 添加到 population2
+        population ← population2
+    until 某个个体足够适应，或者已经经过了足够长的时间
+    return 依据 fitness 选出的 population 中的最优个体
+
+function Reproduce(parent1, parent2) returns 一个个体
+    n ← Length(parent1);  c ← 从 1 到 n 的随机数
+    return Append(Substring(parent1, 1, c), Substring(parent2, c+1, n))
 ```
-8皇后编码：第 c 位数字 = 第 c 列皇后的行号；适应度 = 非攻击对数（解为 28）。
+8皇后编码：第 c 位数字 = 第 c 列皇后的行号（图4-7：第1行是最下面一行）；适应度 = 非攻击对数（解为 8×7/2=28）。图4-6 实例：初始种群 24748552、32752411、24415124、32543213，适应度 24、23、20、11（归一化概率 31%、29%、26%、14%），按权重选亲本→杂交点交叉→个别位突变。
 
-与或图搜索
+与或图搜索（图4-11）
 ```
-function And-Or-Graph-Search(problem):
-    return OrSearch(Initial-State, problem, [])
+function And-Or-Search(problem) returns 一个条件规划或 failure
+    return Or-Search(problem, problem.Initial, [])
 
-function OrSearch(state, problem, path):
-    if Is-Goal(state): return 空计划
-    if state ∈ path 或无合法动作: return Failure   // 环检查
-    for a ∈ Actions(state):
-        plan ← AndSearch(Results(state,a), problem, path ∪ {state})
-        if plan ≠ Failure: return [a; if 感知=… then 对应子规划]
-    return Failure
+function Or-Search(problem, state, path) returns 一个条件规划或 failure
+    if problem.Is-Goal(state) then return 空规划
+    if Is-Cycle(state, path) then return failure            // 环检查
+    for each action 在 problem.Actions(state) 中 do
+        plan ← And-Search(problem, Results(state, action), [state]+[path])
+        if plan ≠ failure then return [action]+[plan]
+    return failure
 
-function AndSearch(states, problem, path):
-    for each s ∈ states:
-        plan_s ← OrSearch(s, problem, path)
-        if plan_s = Failure: return Failure
-    return 所有子规划都成功组成的分支计划
+function And-Search(problem, states, path) returns 一个条件规划或 failure
+    for each sᵢ in states do
+        planᵢ ← Or-Search(problem, sᵢ, path)
+        if planᵢ = failure then return failure
+    return [if s₁ then plan₁ else if s₂ then plan₂ else … if sₙ₋₁ then planₙ₋₁ else planₙ]
 ```
 有限状态空间中终止；解为条件规划子树，光滑环境下解为循环（while）。
 
-在线 DFS 智能体
+在线 DFS 智能体（图4-21）
 ```
-function Online-DFS-Agent(s′):          // s′=新感知到的状态
-    if Is-Goal(s′): return stop
-    if s′ 未见过: untried[s′] ← Actions(s′)
-    if s ≠ null: unbacktracked[s′].push(s)
-    if untried[s′] 空:
-        if unbacktracked[s′] 空: return stop     // 探索完成
-        a ← 沿 unbacktracked[s′].top 回退的动作
-    else a ← untried[s′].pop()
-    result[s,a] ← s′;  s ← s′;  执行 a
+function Online-DFS-Agent(problem, s′) returns 一个动作     // s′=新感知到的状态
+    persistent: s, a（之前的状态和动作，初始为空）
+                result（将 (s,a) 映射到 s′ 的表，初始为空）
+                untried（将 s 映射到未探索动作列表的表）
+                unbacktracked（将 s 映射到未回溯状态队列的表）
+    if problem.Is-Goal(s′) then return stop
+    if s′ 是一个（不在 untried 中的）新状态 then untried[s′] ← problem.Actions(s′)
+    if s 不空 then
+        result[s,a] ← s′
+        将 s 添加到 unbacktracked[s′] 的队首
+    if untried[s′] 为空 then
+        if unbacktracked[s′] 为空 then return stop          // 探索完成
+        else a ← 满足 result[s′,b] = Pop(unbacktracked[s′]) 的动作 b（物理回溯）
+    else a ← Pop(untried[s′])
+    s ← s′;  return a
 ```
-最坏情况每条连接遍历两次（探索最优）；仅当动作可逆时安全。
+最坏情况每条连接恰好遍历两次（探索意义上最优）；仅当动作可逆时安全。
 
-LRTA* 智能体
+LRTA* 智能体（图4-24）
 ```
-function LRTA*-Agent(s′):
-    if Is-Goal(s′): return stop
-    if s′ 新状态: H[s′] ← h(s′)
-    if s ≠ null: H[s] ← max(H[s], c(s,a,s′) + H[s′])    // 更新刚离开的状态
-    a ← argmin_{a′∈Actions(s′)} LRTA*-Cost(s′,a′)
-        其中 LRTA*-Cost(s,a)= c+H[已知结果] ；未试动作视为直接到达目标（h(s′)）
-    s ← s′; 执行 a
+function LRTA*-Agent(problem, s′, h) returns 一个动作
+    persistent: s, a；result 表；H（将 s 映射到代价估计值的表，初始为空）
+    if Is-Goal(s′) then return stop
+    if s′ 是一个（不在 H 中的）新状态 then H[s′] ← h(s′)
+    if s 不空 then
+        result[s,a] ← s′
+        H[s] ← min_{b∈Actions(s)} LRTA*-Cost(problem, s, b, result[s,b], H)   // 更新刚离开的状态
+    a ← argmin_{b∈Actions(s′)} LRTA*-Cost(problem, s′, b, result[s′,b], H)
+    s ← s′;  return a
+
+function LRTA*-Cost(problem, s, a, s′, H) returns 一个代价估计值
+    if s′ 未定义 then return h(s)            // 未试动作乐观地按 h(s) 计
+    else return problem.Action-Cost(s, a, s′) + H[s′]
 ```
 "不确定性下的乐观主义"驱动探索；有限可安全探索环境中保证找到目标，最坏 O(n²) 步。
 
@@ -159,13 +182,17 @@ function LRTA*-Agent(s′):
 
 ## 完整示例
 
-真空吸尘器世界的三个变体（贯穿 4.3–4.4 节）：8 个物理状态（状态 7、8 为目标），动作 Left/Right/Suck。
+8皇后爬山实例（图4-3）：(a) 状态已接近解，仅第4、7列皇后沿对角线互攻；(b) 某状态 h=17，棋盘各格标出"把该列皇后移到该格"所得后继的 h 值，有 8 个并列最优移动 h=12，爬山法任选其一。
+
+真空吸尘器世界的三个变体（贯穿 4.3–4.4 节）：8 个物理状态（图4-9；状态 7、8 为两格皆净的目标），动作 Left/Right/Suck。
 
 1. 不稳定（erratic）版：脏格 Suck 有时顺带清邻格，净格 Suck 有时扬尘——非确定。状态 1 执行 Suck 得 Results(1,Suck)={5,7}。与或搜索给出条件规划（式4-3）：
    `Suck; if 当前状态=5 then [Right, Suck] else []`——若已两格皆净(7)则完成，若只净左格(5)则再走 Right、Suck 到达 8。
 2. 无传感器版：初始信念 {1..8}，无感知也能获取信息：Right → {2,4,6,8}；[Right,Suck] → {4,8}；[Right,Suck,Left,Suck] → 强迫世界到达 {7}。解是动作序列（感知恒空、无偶发分支），在信念状态空间中问题完全可观测。
 3. 光滑（slippery）版：移动有时失效（Right 可能原地不动），不存在无循环解；循环解：`while 不在最右格: Right`（配合吸尘），前提是失效是随机独立的（若皮带断了，重复无意义）。
 4. 局部感知版（4.4）：感知如 [L, Dirty] 时初始信念 {1,3}；转移=预测→可能感知→更新，与或搜索在信念状态上返回测试信念（而非物理状态）的条件规划。
+
+机器人定位（图4-18）：4×16 格世界，感知为 4 位串（北东南西是否有墙）。观测 E₁=1011 后剩 4 个可能位置（a）；向任一方向移动一格再观测 E₂=1010，信念收缩到唯一位置（b）——动作扩大不确定性、观测收缩不确定性的典型示范。
 
 ## 要点
 1. 只要好状态不要路径时就换局部搜索：内存 O(1)，可对付无限空间。
